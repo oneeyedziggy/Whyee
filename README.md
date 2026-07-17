@@ -1,70 +1,70 @@
-# Getting Started with Create React App
+# Correlation App
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+## Purpose
 
-## Available Scripts
+The **Correlation App** is a teaching‑tool and starter template that shows how to _correlate_ user‑provided values with a set of predefined options in a modern React environment. It is designed for developers who want a quick, visual sandbox to experiment with:
 
-In the project directory, you can run:
+- Simple statistical or lookup‑based correlation logic (e.g., mapping a numeric score to a risk tier, matching an ID to a dataset, etc.)
+- Integration of a custom data‑processing module without leaving the UI
+- Rapid prototyping of interactive dashboards that combine form input with immediate visual feedback.
 
-### `npm start`
+The core component, `TestInput.jsx`, renders a form where a user can enter a value or select items. This is the exact spot where you would plug in your correlation algorithm – whether it’s a linear regression, a nearest‑neighbor lookup, or a call to an external analytics service.
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+## Core Architecture
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+- **React + RSbuild** – provides the development server and production build pipeline.
+- **Bootstrap** – supplies responsive layout and basic styling.
+- **styled‑components** – used for custom, theme‑aware UI elements (e.g., glass‑morphism cards, dark‑mode support).
+- **`src/App.js`** – the root component that mounts `TestInput`.
+- **`src/testInput.jsx`** – placeholder for your correlation logic and result display.
 
-### `npm test`
+## Setup (quick start)
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+```bash
+# Clone the repo (if you haven’t already)
+git clone <repo‑url>
+cd correlationApp/correlation
 
-### `npm run build`
+# Install npm dependencies
+npm install
+```
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+### Development
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+```bash
+npm start
+```
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+The app runs with RSbuild on `http://localhost:3000`. Any change you make to the source files triggers a fast hot reload.
 
-### `npm run eject`
+### Build for Production
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+```bash
+npm run build
+```
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+The production‑ready bundle is output to the `build/` folder.
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+### Linting
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+```bash
+npm run lint
+```
 
-## Learn More
+Runs ESLint separately from the build so dev startup stays fast.
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+### Testing
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+```bash
+npm test
+```
 
-### Code Splitting
+Runs the Jest test suite (includes `App.test.js`).
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+## Extending the Project
 
-### Analyzing the Bundle Size
+- **Add correlation logic** – Implement your algorithm inside `src/TestInput.jsx` and display the results.
+- **Unit tests** – Write tests for the new logic to keep the app reliable.
+- **Polish UI** – Apply dark mode, glass‑morphism cards, and subtle micro‑animations to meet premium design standards.
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+Feel free to let me know which direction you’d like to take next!
