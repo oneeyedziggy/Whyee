@@ -1,0 +1,151 @@
+import {
+  createWorkletRuntime,
+  runOnRuntimeAsync,
+  type WorkletRuntime,
+} from 'react-native-worklets';
+import {
+  computePreparedCorrelationRange,
+  getPreparedCorrelationCellCount,
+  mergePreparedCorrelationCells,
+  prepareCorrelation,
+  type PreparedCorrelation,
+} from '../lib/correlationKernel';
+import { CorrelationCancelledError } from '../lib/correlationEngine';
+import type {
+  CorrelationBatchListener,
+  CorrelationCellResult,
+  CorrelationRequest,
+  CorrelationRow,
+  CorrelationTask,
+} from '../types/correlation';
+
+declare global {
+  var __correlationPrepared:
+    | { generation: number; prepared: PreparedCorrelation }
+    | undefined;
+}
+
+const maximumWorkerCount = 3;
+const chunkSize = 64;
+let workerPool: WorkletRuntime[] | null = null;
+let nextGeneration = 1;
+
+const getWorkerPool = (): WorkletRuntime[] => {
+  if (!workerPool) {
+    workerPool = Array.from({ length: maximumWorkerCount }, (_, index) =>
+      createWorkletRuntime({ name: `correlation-${index + 1}` }),
+    );
+  }
+  return workerPool;
+};
+
+const installPreparedCorrelation = (
+  generation: number,
+  prepared: PreparedCorrelation,
+): void => {
+  'worklet';
+  globalThis.__correlationPrepared = { generation, prepared };
+};
+
+const computeInstalledRange = (
+  generation: number,
+  start: number,
+  end: number,
+): CorrelationCellResult[] | null => {
+  'worklet';
+  const installed = globalThis.__correlationPrepared;
+  if (!installed || installed.generation !== generation) return null;
+  return computePreparedCorrelationRange(installed.prepared, start, end);
+};
+
+export const runCorrelation = (
+  request: CorrelationRequest,
+  onBatch?: CorrelationBatchListener,
+): CorrelationTask => {
+  const generation = nextGeneration;
+  nextGeneration += 1;
+  let cancelled = false;
+  let settled = false;
+  let rejectTask: ((reason?: unknown) => void) | null = null;
+
+  const execute = async (): Promise<CorrelationRow[]> => {
+    const pool = getWorkerPool();
+    const prepared = await runOnRuntimeAsync(
+      pool[0],
+      prepareCorrelation,
+      request,
+    );
+    if (cancelled) throw new CorrelationCancelledError();
+
+    const total = getPreparedCorrelationCellCount(prepared);
+    const activeWorkers = pool.slice(
+      0,
+      Math.max(1, Math.min(pool.length, Math.ceil(total / chunkSize))),
+    );
+    await Promise.all(
+      activeWorkers.map((runtime) =>
+        runOnRuntimeAsync(
+          runtime,
+          installPreparedCorrelation,
+          generation,
+          prepared,
+        ),
+      ),
+    );
+    if (cancelled) throw new CorrelationCancelledError();
+
+    let nextStart = 0;
+    let completed = 0;
+    const cells: CorrelationCellResult[] = [];
+    const runWorker = async (runtime: WorkletRuntime): Promise<void> => {
+      while (!cancelled) {
+        const start = nextStart;
+        if (start >= total) return;
+        nextStart += chunkSize;
+        const batchCells = await runOnRuntimeAsync(
+          runtime,
+          computeInstalledRange,
+          generation,
+          start,
+          start + chunkSize,
+        );
+        if (cancelled) return;
+        if (!batchCells)
+          throw new Error('Correlation worker generation was replaced');
+        cells.push(...batchCells);
+        completed += batchCells.length;
+        onBatch?.({ cells: batchCells, completed, total });
+      }
+    };
+
+    await Promise.all(activeWorkers.map(runWorker));
+    if (cancelled) throw new CorrelationCancelledError();
+    return mergePreparedCorrelationCells(prepared, cells);
+  };
+
+  const promise = new Promise<CorrelationRow[]>((resolve, reject) => {
+    rejectTask = reject;
+    execute().then(
+      (rows) => {
+        if (settled) return;
+        settled = true;
+        resolve(rows);
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      },
+    );
+  });
+
+  return {
+    promise,
+    cancel: () => {
+      if (settled) return;
+      settled = true;
+      cancelled = true;
+      rejectTask?.(new CorrelationCancelledError());
+    },
+  };
+};

@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "whyee",
+    "slug": "whyee",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.oneeyedziggy.correlationmobile"
+    },
+    "android": {
+      "package": "com.oneeyedziggy.correlationmobile",
+      "permissions": [
+        "SCHEDULE_EXACT_ALARM"
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-sharing"
+    ],
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "276afd74-7b97-454f-b4e0-6d59d7903d25"
+      }
+    }
+  }
+}
