@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   Button,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { InfoLink } from './InfoLink';
+import { SystemScreen } from './SystemScreen';
 import {
   isStatisticEnabled,
   statisticsRegistry,
@@ -78,10 +80,14 @@ export const StatisticsSettings = ({
       visible={visible}
       animationType={desktop ? 'fade' : 'slide'}
       transparent={desktop}
+      statusBarTranslucent={!desktop && Platform.OS === 'android'}
       onRequestClose={onClose}
-      presentationStyle={desktop ? 'overFullScreen' : 'pageSheet'}
+      presentationStyle={desktop ? 'overFullScreen' : 'fullScreen'}
     >
-      <View style={desktop ? styles.backdrop : styles.fill}>
+      <SystemScreen
+        enabled={!desktop}
+        style={desktop ? styles.backdrop : styles.fill}
+      >
         {desktop ? (
           <Pressable
             accessibilityLabel="Close statistics settings"
@@ -186,13 +192,13 @@ export const StatisticsSettings = ({
             ) : null}
           </ScrollView>
         </View>
-      </View>
+      </SystemScreen>
     </Modal>
   );
 };
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.canvas, paddingTop: 48 },
+  root: { flex: 1, backgroundColor: colors.canvas },
   fill: { flex: 1 },
   backdrop: {
     alignItems: 'center',

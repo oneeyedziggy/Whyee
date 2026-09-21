@@ -1,4 +1,4 @@
-import * as Notifications from 'expo-notifications';
+import type * as ExpoNotifications from 'expo-notifications';
 import type { CategoryDefinition } from '../types/category';
 import type { NotificationRequestSpec } from './notificationSchedule';
 import type {
@@ -8,22 +8,39 @@ import type {
 
 const channelId = 'category-reminders';
 const categoryPrefix = 'category_entry_';
+let notificationsModule: typeof ExpoNotifications | null | undefined;
+let handlerRegistered = false;
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+const getNotifications = (): typeof ExpoNotifications | null => {
+  if (notificationsModule !== undefined) return notificationsModule;
+  try {
+    const loaded = require(
+      'expo-notifications',
+    ) as typeof ExpoNotifications;
+    notificationsModule = loaded;
+    if (!handlerRegistered) {
+      loaded.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowBanner: true,
+          shouldShowList: true,
+          shouldPlaySound: true,
+          shouldSetBadge: false,
+        }),
+      });
+      handlerRegistered = true;
+    }
+  } catch {
+    notificationsModule = null;
+  }
+  return notificationsModule ?? null;
+};
 
 const nativeCategoryId = (categoryId: string): string =>
   `${categoryPrefix}${categoryId.replace(/[^A-Za-z0-9_]/g, '_')}`;
 
 const getActions = (
   category: CategoryDefinition,
-): Notifications.NotificationAction[] => {
+): ExpoNotifications.NotificationAction[] => {
   if (category.kind === 'multiple-choice' && !category.multiSelect) {
     return category.options.slice(0, 3).map((option, index) => ({
       identifier: `choice:${index}`,
@@ -58,8 +75,10 @@ const getActions = (
 const registerCategory = async (
   category: CategoryDefinition,
 ): Promise<string> => {
+  const notifications = getNotifications();
+  if (!notifications) return nativeCategoryId(category.id);
   const identifier = nativeCategoryId(category.id);
-  await Notifications.setNotificationCategoryAsync(
+  await notifications.setNotificationCategoryAsync(
     identifier,
     getActions(category),
   );
@@ -67,23 +86,27 @@ const registerCategory = async (
 };
 
 const requestPermission = async (): Promise<boolean> => {
-  await Notifications.setNotificationChannelAsync(channelId, {
+  const notifications = getNotifications();
+  if (!notifications) return false;
+  await notifications.setNotificationChannelAsync(channelId, {
     name: 'Category reminders',
     description: 'Recurring reminders to enter category data.',
-    importance: Notifications.AndroidImportance.HIGH,
+    importance: notifications.AndroidImportance.HIGH,
     sound: 'default',
   });
-  const current = await Notifications.getPermissionsAsync();
+  const current = await notifications.getPermissionsAsync();
   if (
     current.granted ||
-    current.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL
+    current.ios?.status ===
+      notifications.IosAuthorizationStatus.PROVISIONAL
   ) {
     return true;
   }
-  const requested = await Notifications.requestPermissionsAsync();
+  const requested = await notifications.requestPermissionsAsync();
   return (
     requested.granted ||
-    requested.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL
+    requested.ios?.status ===
+      notifications.IosAuthorizationStatus.PROVISIONAL
   );
 };
 
@@ -91,10 +114,12 @@ const scheduleCategory = async (
   category: CategoryDefinition,
   specs: NotificationRequestSpec[],
 ): Promise<string[]> => {
+  const notifications = getNotifications();
+  if (!notifications) return [];
   const categoryIdentifier = await registerCategory(category);
   return Promise.all(
     specs.map((spec) =>
-      Notifications.scheduleNotificationAsync({
+      notifications.scheduleNotificationAsync({
         content: {
           title: `Enter ${category.name}`,
           body: `Log today's ${category.name}.`,
@@ -108,14 +133,14 @@ const scheduleCategory = async (
         },
         trigger: spec.weekday
           ? {
-              type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+              type: notifications.SchedulableTriggerInputTypes.WEEKLY,
               weekday: spec.weekday,
               hour: spec.hour,
               minute: spec.minute,
               channelId,
             }
           : {
-              type: Notifications.SchedulableTriggerInputTypes.DAILY,
+              type: notifications.SchedulableTriggerInputTypes.DAILY,
               hour: spec.hour,
               minute: spec.minute,
               channelId,
@@ -126,18 +151,20 @@ const scheduleCategory = async (
 };
 
 const cancelCategory = async (categoryId: string): Promise<void> => {
-  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+  const notifications = getNotifications();
+  if (!notifications) return;
+  const scheduled = await notifications.getAllScheduledNotificationsAsync();
   await Promise.all(
     scheduled
       .filter((request) => request.content.data?.categoryId === categoryId)
       .map((request) =>
-        Notifications.cancelScheduledNotificationAsync(request.identifier),
+        notifications.cancelScheduledNotificationAsync(request.identifier),
       ),
   );
 };
 
 const toResponseData = (
-  response: Notifications.NotificationResponse,
+  response: ExpoNotifications.NotificationResponse,
 ): NotificationResponseData | null => {
   const data = response.notification.request.content.data;
   if (
@@ -157,14 +184,19 @@ const toResponseData = (
 
 const addResponseListener = (
   listener: (response: NotificationResponseData) => void,
-) =>
-  Notifications.addNotificationResponseReceivedListener((response) => {
+) => {
+  const notifications = getNotifications();
+  if (!notifications) return { remove: () => undefined };
+  return notifications.addNotificationResponseReceivedListener((response) => {
     const data = toResponseData(response);
     if (data) listener(data);
   });
+};
 
 const getLastResponse = async (): Promise<NotificationResponseData | null> => {
-  const response = await Notifications.getLastNotificationResponseAsync();
+  const notifications = getNotifications();
+  if (!notifications) return null;
+  const response = await notifications.getLastNotificationResponseAsync();
   return response ? toResponseData(response) : null;
 };
 

@@ -1,6 +1,14 @@
 import { Download, Upload, X } from 'lucide-react-native';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { colors } from '../theme/tokens';
+import { SystemScreen } from './SystemScreen';
 
 interface SettingsDrawerProps {
   visible: boolean;
@@ -18,10 +26,11 @@ export const SettingsDrawer = ({
   <Modal
     visible={visible}
     transparent
+    statusBarTranslucent={Platform.OS === 'android'}
     animationType="fade"
     onRequestClose={onClose}
   >
-    <View style={styles.root}>
+    <SystemScreen style={styles.root}>
       <Pressable
         accessibilityLabel="Close settings"
         accessibilityRole="button"
@@ -67,7 +76,7 @@ export const SettingsDrawer = ({
           </View>
         </Pressable>
       </View>
-    </View>
+    </SystemScreen>
   </Modal>
 );
 
@@ -80,7 +89,6 @@ const styles = StyleSheet.create({
     borderLeftWidth: 1,
     maxWidth: 360,
     paddingHorizontal: 18,
-    paddingTop: 52,
     width: '84%',
   },
   header: {

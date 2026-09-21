@@ -71,6 +71,9 @@ describe('WorkspacePicker', () => {
     );
     const scroller = screen.getByTestId('workspace-track');
 
+    expect(() =>
+      fireEvent(scroller, 'layout', { nativeEvent: null }),
+    ).not.toThrow();
     fireEvent(scroller, 'layout', {
       nativeEvent: { layout: { width: 400, height: 40, x: 0, y: 0 } },
     });
@@ -88,4 +91,5 @@ describe('WorkspacePicker', () => {
         .disabled,
     ).toBe(true);
   });
+
 });

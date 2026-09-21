@@ -6,16 +6,23 @@ import type {
 } from '../types/category';
 import type { CorrelationRequest } from '../types/correlation';
 import type { CategoryGroup } from '../types/category';
+import {
+  getDurationIntervals,
+  splitIntervalHoursByLocalDate,
+} from './durationTimers';
 import { scoreSentiment } from './sentiment';
 
 const numericValue = (
   record: CategorySelectionRecord,
   field: VirtualSeriesDefinition['field'],
   transform?: VirtualSeriesDefinition['transform'],
+  optionValue?: number,
 ): number | null => {
   if (transform === 'sentimentScore')
     return record.sentimentScore ?? scoreSentiment(record.noteText ?? '');
   if (field === 'value') return record.value;
+  if (field === 'optionSelected')
+    return record.selectedValues?.includes(optionValue as number) ? 1 : 0;
   if (field === 'durationMs') return record.durationMs ?? null;
   const timestamp = field === 'startTime' ? record.startTime : record.stopTime;
   if (!timestamp) return null;
@@ -73,7 +80,10 @@ const fieldDescriptions: Record<VirtualSeriesDefinition['field'], string> = {
   startTime: 'the start time, as milliseconds since local midnight',
   stopTime: 'the stop time, as milliseconds since local midnight',
   durationMs: 'the elapsed duration in milliseconds',
+  durationHoursByDay:
+    'the elapsed timer hours allocated to each local calendar day',
   noteText: 'the note text',
+  optionSelected: 'whether this choice was picked',
 };
 
 const verbDescriptions: Record<SummaryVerb, string> = {
@@ -93,6 +103,10 @@ export const describeVirtualSeries = (
     return 'Scores each note locally on a negative-to-positive scale and averages the scores for the day. Note text never leaves this device.';
   if (definition.transform === 'inverse')
     return 'Mirrors the main series around its own average, so high days become low days. Useful for reading a correlation in the opposite direction.';
+  if (definition.field === 'optionSelected')
+    return definition.aggregation === 'sum'
+      ? 'Counts how many times this choice was picked that day.'
+      : '1 on days this choice was picked at least once, 0 otherwise.';
   const scope = definition.perInstance
     ? 'Treats every entry of the day as its own data point'
     : `Takes ${fieldDescriptions[definition.field]} from every entry of the day, ${verbDescriptions[definition.aggregation]} into one number per day`;
@@ -107,10 +121,14 @@ export const createVirtualCorrelationInput = (
   offsets: number[],
   includeCalendar = true,
   groups: CategoryGroup[] = [],
+  asOf = Date.now(),
 ): CorrelationRequest => {
   const inputCategories: CorrelationRequest['categories'] = [];
   const inputRecords: CorrelationRequest['records'] = [];
   const allRecords = Object.values(records);
+  const projectedDateKeys = new Set(
+    allRecords.map((record) => record.dateKey),
+  );
   const recordsByCategoryId = new Map<string, CategorySelectionRecord[]>();
   for (const record of allRecords) {
     const categoryRecords = recordsByCategoryId.get(record.categoryId) ?? [];
@@ -228,10 +246,24 @@ export const createVirtualCorrelationInput = (
         });
         const valuesByDate = new Map<string, number[]>();
         for (const record of instanceRecords) {
+          if (definition.field === 'durationHoursByDay') {
+            for (const interval of getDurationIntervals(record, asOf)) {
+              for (const [dateKey, hours] of splitIntervalHoursByLocalDate(
+                interval,
+              )) {
+                const dateValues = valuesByDate.get(dateKey) ?? [];
+                dateValues.push(hours);
+                valuesByDate.set(dateKey, dateValues);
+                projectedDateKeys.add(dateKey);
+              }
+            }
+            continue;
+          }
           const value = numericValue(
             record,
             definition.field,
             definition.transform,
+            definition.optionValue,
           );
           if (value === null) continue;
           const dateValues = valuesByDate.get(record.dateKey) ?? [];
@@ -273,8 +305,7 @@ export const createVirtualCorrelationInput = (
         name: definition.name,
         global: true,
       });
-      const dates = new Set(allRecords.map((record) => record.dateKey));
-      for (const dateKey of dates) {
+      for (const dateKey of projectedDateKeys) {
         inputRecords.push({
           categoryId: definition.id,
           dateKey,

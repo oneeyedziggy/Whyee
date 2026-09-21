@@ -19,7 +19,9 @@ export type VirtualSeriesField =
   | 'startTime'
   | 'stopTime'
   | 'durationMs'
-  | 'noteText';
+  | 'durationHoursByDay'
+  | 'noteText'
+  | 'optionSelected';
 
 export type VirtualSeriesTransform = 'sentimentScore' | 'inverse';
 
@@ -32,6 +34,8 @@ export interface VirtualSeriesDefinition {
   enabled?: boolean;
   transform?: VirtualSeriesTransform;
   perInstance?: boolean;
+  // Only set (and used) when field is 'optionSelected'; the ChoiceOption value this series tracks.
+  optionValue?: number;
 }
 
 export interface ChoiceOption {
@@ -86,6 +90,10 @@ export interface ChoiceCategory extends BaseCategory {
   multiSelect: boolean;
   weeklyEffectEnabled: boolean;
   options: ChoiceOption[];
+  // 'intensity': one aggregated numeric series. 'items': one binary series per option.
+  optionSeriesMode: 'intensity' | 'items';
+  // How same-day repeats combine per option in 'items' mode: total count vs. clamped to 0/1.
+  optionOccurrenceMode: 'sum' | 'capped';
 }
 
 export interface NumericCategory extends BaseCategory {

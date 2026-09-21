@@ -17,7 +17,10 @@ import {
   createBuiltInTestDataset,
   TEST_DATASET_SEED,
 } from '../src/lib/testDataset';
-import { createDefaultCategory } from '../src/lib/category';
+import {
+  createDefaultCategory,
+  recomputeVirtualSeries,
+} from '../src/lib/category';
 import { createVirtualCorrelationInput } from '../src/lib/virtualSeries';
 import { documentationSections } from '../src/lib/documentation';
 import { scoreSentiment } from '../src/lib/sentiment';
@@ -351,6 +354,102 @@ describe('correlation engine', () => {
     expect(input.records.some((record) => record.value === 5000)).toBe(true);
   });
 
+  it('allocates date-spanning timer hours to each local day', () => {
+    const duration = createDefaultCategory('duration', 0, 'Focus');
+    const start = new Date(2026, 2, 1, 22, 0, 0);
+    const stop = new Date(2026, 2, 2, 2, 0, 0);
+    const input = createVirtualCorrelationInput(
+      [duration],
+      {
+        timer: {
+          key: '2026-03-01:0:timer',
+          categoryId: duration.id,
+          dateKey: '2026-03-01',
+          ordinal: 0,
+          localTime: '22:00:00',
+          value: 0,
+          startTime: start.toISOString(),
+          stopTime: stop.toISOString(),
+        },
+      },
+      [0],
+      false,
+      [],
+      stop.getTime(),
+    );
+    const seriesId = `${duration.id}:durationHoursByDay:sum`;
+
+    expect(
+      input.records.filter((record) => record.categoryId === seriesId),
+    ).toEqual([
+      { categoryId: seriesId, dateKey: '2026-03-01', value: 2 },
+      { categoryId: seriesId, dateKey: '2026-03-02', value: 2 },
+    ]);
+  });
+
+  it('omits daily timer hours when the stop is on the start date', () => {
+    const duration = createDefaultCategory('duration', 0, 'Focus');
+    const start = new Date(2026, 2, 1, 20, 0, 0);
+    const stop = new Date(2026, 2, 1, 23, 0, 0);
+    const input = createVirtualCorrelationInput(
+      [duration],
+      {
+        timer: {
+          key: '2026-03-01:0:timer',
+          categoryId: duration.id,
+          dateKey: '2026-03-01',
+          ordinal: 0,
+          localTime: '20:00:00',
+          value: 0,
+          startTime: start.toISOString(),
+          stopTime: stop.toISOString(),
+        },
+      },
+      [0],
+      false,
+      [],
+      stop.getTime(),
+    );
+
+    expect(
+      input.records.filter((record) =>
+        record.categoryId.includes('durationHoursByDay'),
+      ),
+    ).toEqual([]);
+  });
+
+  it('projects an active date-spanning timer through the supplied time', () => {
+    const duration = createDefaultCategory('duration', 0, 'Focus');
+    const start = new Date(2026, 2, 1, 23, 0, 0);
+    const asOf = new Date(2026, 2, 2, 2, 0, 0);
+    const input = createVirtualCorrelationInput(
+      [duration],
+      {
+        timer: {
+          key: `2026-03-01:0:${duration.id}`,
+          categoryId: duration.id,
+          dateKey: '2026-03-01',
+          ordinal: 0,
+          localTime: '23:00:00',
+          value: 0,
+          startTime: start.toISOString(),
+        },
+      },
+      [0],
+      false,
+      [],
+      asOf.getTime(),
+    );
+    const seriesId = `${duration.id}:durationHoursByDay:sum`;
+
+    expect(
+      input.records.filter((record) => record.categoryId === seriesId),
+    ).toEqual([
+      { categoryId: seriesId, dateKey: '2026-03-01', value: 1 },
+      { categoryId: seriesId, dateKey: '2026-03-02', value: 2 },
+    ]);
+  });
+
   it('keeps documentation bundled and searchable by concept text', () => {
     expect(documentationSections.length).toBeGreaterThanOrEqual(9);
     expect(
@@ -647,6 +746,71 @@ describe('correlation engine', () => {
     expect(createCorrelationInputHash([category], records, [0])).not.toBe(
       createCorrelationInputHash([category], records, [0, 1]),
     );
+    expect(
+      createCorrelationInputHash([category], records, [0], true, [], 1000),
+    ).not.toBe(
+      createCorrelationInputHash([category], records, [0], true, [], 2000),
+    );
+  });
+
+  it('produces per-option binary series for separate-items choice categories', () => {
+    const base = createDefaultCategory('multiple-choice', 0, 'Symptoms');
+    if (base.kind !== 'multiple-choice') throw new Error('expected choice');
+    // Jest mocks expo-crypto's randomUUID as undefined, so default options share
+    // one id; use explicit distinct ids so per-option series ids don't collide.
+    const options = [
+      { id: 'headache', label: 'Headache', value: 0 },
+      { id: 'nausea', label: 'Nausea', value: 1 },
+    ];
+    const category = {
+      ...base,
+      id: 'symptoms',
+      options,
+      multiSelect: true,
+      allowMultiplePerDay: true,
+      optionSeriesMode: 'items' as const,
+    };
+    const withSeries = {
+      ...category,
+      virtualSeries: recomputeVirtualSeries(category),
+    };
+    const [headache, nausea] = withSeries.options;
+    const records = {
+      morning: {
+        key: 'morning',
+        categoryId: 'symptoms',
+        dateKey: '2026-01-01',
+        ordinal: 0,
+        localTime: '09:00:00',
+        value: headache.value,
+        selectedValues: [headache.value],
+      },
+      evening: {
+        key: 'evening',
+        categoryId: 'symptoms',
+        dateKey: '2026-01-01',
+        ordinal: 1,
+        localTime: '20:00:00',
+        value: headache.value,
+        selectedValues: [headache.value],
+      },
+    };
+
+    const input = createVirtualCorrelationInput(
+      [withSeries],
+      records,
+      [0],
+      false,
+    );
+
+    const headacheId = `symptoms:option:${headache.id}`;
+    const nauseaId = `symptoms:option:${nausea.id}`;
+    expect(
+      input.records.find((record) => record.categoryId === headacheId)?.value,
+    ).toBe(1);
+    expect(
+      input.records.find((record) => record.categoryId === nauseaId)?.value,
+    ).toBe(0);
   });
 
   it('migrates legacy flat categories into a default group and repairs group membership', () => {

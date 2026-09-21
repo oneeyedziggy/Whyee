@@ -16,6 +16,7 @@ import { isDuplicateWorkspaceName } from '../lib/workspaces';
 import { DraggableList } from './DraggableList';
 import { colors } from '../theme/tokens';
 import type { WorkspaceMeta } from '../types/workspace';
+import { SystemScreen } from './SystemScreen';
 
 interface WorkspaceManagerModalProps {
   visible: boolean;
@@ -70,10 +71,14 @@ export const WorkspaceManagerModal = ({
       visible={visible}
       animationType={desktop ? 'fade' : 'slide'}
       transparent={desktop}
-      presentationStyle={desktop ? 'overFullScreen' : 'pageSheet'}
+      statusBarTranslucent={!desktop && Platform.OS === 'android'}
+      presentationStyle={desktop ? 'overFullScreen' : 'fullScreen'}
       onRequestClose={onClose}
     >
-      <View style={desktop ? styles.backdrop : styles.fill}>
+      <SystemScreen
+        enabled={!desktop}
+        style={desktop ? styles.backdrop : styles.fill}
+      >
         {desktop ? (
           <Pressable
             accessibilityLabel="Close workspaces"
@@ -150,7 +155,7 @@ export const WorkspaceManagerModal = ({
             />
           </ScrollView>
         </View>
-      </View>
+      </SystemScreen>
     </Modal>
   );
 };

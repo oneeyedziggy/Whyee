@@ -1,5 +1,5 @@
 import Slider from '@react-native-community/slider';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useDeferredValue, useMemo, useState } from 'react';
 import type { CorrelationRow } from '../types/correlation';
 import { nextSortDirection, type SortDirection } from '../lib/sort';
@@ -21,6 +21,8 @@ interface TopMatch {
   value: number;
 }
 
+const resultBatchSize = 50;
+
 const cellColor = (value: number, min: number, max: number) => {
   if (!Number.isFinite(value)) return '#f8fafc';
   const fraction = max === min ? 0.5 : (value - min) / (max - min);
@@ -36,6 +38,7 @@ export const TopCorrelationsPanel = ({
     'first' | 'second' | 'lag' | 'value'
   >('value');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [visibleResultCount, setVisibleResultCount] = useState(resultBatchSize);
 
   const deferredRows = useDeferredValue(rows);
   const [minValue, maxValue] = useMemo(() => {
@@ -176,8 +179,8 @@ export const TopCorrelationsPanel = ({
               style={[styles.tableHeader, styles.tableHeaderLast]}
             />
           </View>
-          <ScrollView style={styles.tableBody} nestedScrollEnabled>
-            {sortedMatches.map((match) => (
+          <View>
+            {sortedMatches.slice(0, visibleResultCount).map((match) => (
               <View
                 key={match.key}
                 style={styles.tableRow}
@@ -203,7 +206,21 @@ export const TopCorrelationsPanel = ({
                 </Text>
               </View>
             ))}
-          </ScrollView>
+            {visibleResultCount < sortedMatches.length ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() =>
+                  setVisibleResultCount((current) => current + resultBatchSize)
+                }
+                style={styles.showMore}
+              >
+                <Text style={styles.showMoreText}>
+                  Show more ({sortedMatches.length - visibleResultCount}{' '}
+                  remaining)
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
       )}
     </Panel>
@@ -225,9 +242,8 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     borderBottomWidth: 1,
   },
-  tableBody: {
-    maxHeight: 320,
-  },
+  showMore: { alignItems: 'center', minHeight: 44, justifyContent: 'center' },
+  showMoreText: { color: colors.primary, fontSize: 13, fontWeight: '700' },
   tableHeader: {
     alignItems: 'center',
     backgroundColor: '#eef3f8',

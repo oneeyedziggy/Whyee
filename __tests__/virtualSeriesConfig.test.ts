@@ -137,4 +137,137 @@ describe('virtual series recomputation', () => {
         expect(series.enabled).toBe(false);
     }
   });
+
+  it('defaults date-spanning timer hours on and preserves an opt-out', () => {
+    const duration = createDefaultCategory('duration', 0);
+    const dailyHours = duration.virtualSeries.find(
+      (series) => series.field === 'durationHoursByDay',
+    );
+    expect(dailyHours?.enabled).not.toBe(false);
+
+    const recomputed = recomputeVirtualSeries({
+      ...duration,
+      virtualSeries: duration.virtualSeries.map((series) =>
+        series.field === 'durationHoursByDay'
+          ? { ...series, enabled: false }
+          : series,
+      ),
+    });
+    expect(
+      recomputed.find((series) => series.field === 'durationHoursByDay')
+        ?.enabled,
+    ).toBe(false);
+  });
+
+  it('generates one binary series per option in separate-items mode', () => {
+    const choice = createDefaultCategory('multiple-choice', 0);
+    if (choice.kind !== 'multiple-choice') throw new Error('expected choice');
+
+    const items = recomputeVirtualSeries({
+      ...choice,
+      multiSelect: true,
+      optionSeriesMode: 'items',
+    });
+
+    expect(items).toHaveLength(choice.options.length);
+    for (const [index, option] of choice.options.entries()) {
+      expect(items[index].id).toBe(`${choice.id}:option:${option.id}`);
+      expect(items[index].field).toBe('optionSelected');
+      expect(items[index].optionValue).toBe(option.value);
+      expect(items[index].aggregation).toBe('max');
+    }
+  });
+
+  it('uses sum aggregation when the occurrence mode is sum', () => {
+    const choice = createDefaultCategory('multiple-choice', 0);
+    if (choice.kind !== 'multiple-choice') throw new Error('expected choice');
+
+    const items = recomputeVirtualSeries({
+      ...choice,
+      multiSelect: true,
+      optionSeriesMode: 'items',
+      optionOccurrenceMode: 'sum',
+    });
+
+    expect(items.every((series) => series.aggregation === 'sum')).toBe(true);
+  });
+
+  it('collapses back to a single raw series when switching out of items mode', () => {
+    const choice = createDefaultCategory('multiple-choice', 0);
+    if (choice.kind !== 'multiple-choice') throw new Error('expected choice');
+
+    const items = recomputeVirtualSeries({
+      ...choice,
+      multiSelect: true,
+      optionSeriesMode: 'items',
+    });
+    const back = recomputeVirtualSeries({
+      ...choice,
+      multiSelect: true,
+      optionSeriesMode: 'intensity',
+      virtualSeries: items,
+    });
+
+    expect(back).toHaveLength(1);
+    expect(back[0].field).toBe('value');
+  });
+
+  it('preserves per-option enabled state across option reorders', () => {
+    const choice = createDefaultCategory('multiple-choice', 0);
+    if (choice.kind !== 'multiple-choice') throw new Error('expected choice');
+    // Jest mocks expo-crypto's randomUUID as undefined, so default options share
+    // one id; use explicit distinct ids so per-option series ids don't collide.
+    const options = [
+      { id: 'option-a', label: 'A', value: 0 },
+      { id: 'option-b', label: 'B', value: 1 },
+      { id: 'option-c', label: 'C', value: 2 },
+    ];
+
+    const items = recomputeVirtualSeries({
+      ...choice,
+      options,
+      multiSelect: true,
+      optionSeriesMode: 'items',
+    });
+    const disabled = items.map((series, index) =>
+      index === 0 ? { ...series, enabled: false } : series,
+    );
+    const reorderedOptions = [...options].reverse().map((option, index) => ({
+      ...option,
+      value: index,
+    }));
+
+    const afterReorder = recomputeVirtualSeries({
+      ...choice,
+      multiSelect: true,
+      optionSeriesMode: 'items',
+      options: reorderedOptions,
+      virtualSeries: disabled,
+    });
+
+    const firstOptionSeries = afterReorder.find(
+      (series) => series.id === `${choice.id}:option:${options[0].id}`,
+    );
+    expect(firstOptionSeries?.enabled).toBe(false);
+  });
+
+  it('describes option series based on occurrence mode', () => {
+    const choice = createDefaultCategory('multiple-choice', 0);
+    if (choice.kind !== 'multiple-choice') throw new Error('expected choice');
+
+    const capped = recomputeVirtualSeries({
+      ...choice,
+      multiSelect: true,
+      optionSeriesMode: 'items',
+    });
+    const summed = recomputeVirtualSeries({
+      ...choice,
+      multiSelect: true,
+      optionSeriesMode: 'items',
+      optionOccurrenceMode: 'sum',
+    });
+
+    expect(describeVirtualSeries(capped[0])).toContain('at least once');
+    expect(describeVirtualSeries(summed[0])).toContain('Counts how many times');
+  });
 });

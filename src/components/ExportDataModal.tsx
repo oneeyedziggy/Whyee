@@ -15,6 +15,7 @@ import {
 } from '../lib/dataTransfer';
 import { saveTransferArchives } from '../lib/dataTransferFile';
 import { colors } from '../theme/tokens';
+import { SystemScreen } from './SystemScreen';
 import type {
   ExportLayout,
   ExportSelection,
@@ -145,10 +146,11 @@ export const ExportDataModal = ({
     <Modal
       visible={visible}
       animationType="slide"
-      presentationStyle="pageSheet"
+      statusBarTranslucent
+      presentationStyle="fullScreen"
       onRequestClose={onClose}
     >
-      <View style={styles.root}>
+      <SystemScreen style={styles.root}>
         <View style={styles.header}>
           <View style={styles.headerCopy}>
             <Text style={styles.title}>Export data</Text>
@@ -269,13 +271,13 @@ export const ExportDataModal = ({
             {busy ? 'Exporting' : 'Export'}
           </Text>
         </Pressable>
-      </View>
+      </SystemScreen>
     </Modal>
   );
 };
 
 const styles = StyleSheet.create({
-  root: { backgroundColor: colors.canvas, flex: 1, paddingTop: 48 },
+  root: { backgroundColor: colors.canvas, flex: 1 },
   header: {
     alignItems: 'center',
     flexDirection: 'row',

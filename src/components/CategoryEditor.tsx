@@ -38,6 +38,7 @@ import {
 } from './CategoryEditorControls';
 import { InfoLink } from './InfoLink';
 import { NotificationSettings } from './NotificationSettings';
+import { SystemScreen } from './SystemScreen';
 
 interface CategoryEditorProps {
   visible: boolean;
@@ -107,10 +108,14 @@ export const CategoryEditor = ({
       visible={visible}
       animationType={desktop ? 'fade' : 'slide'}
       transparent={desktop}
+      statusBarTranslucent={!desktop && Platform.OS === 'android'}
       onRequestClose={onClose}
-      presentationStyle={desktop ? 'overFullScreen' : 'pageSheet'}
+      presentationStyle={desktop ? 'overFullScreen' : 'fullScreen'}
     >
-      <View style={desktop ? styles.desktopBackdrop : undefined}>
+      <SystemScreen
+        enabled={!desktop}
+        style={desktop ? styles.desktopBackdrop : styles.mobileModal}
+      >
         {desktop ? (
           <Pressable
             accessibilityLabel="Close category editor"
@@ -205,7 +210,7 @@ export const CategoryEditor = ({
             />
           ) : null}
         </Animated.View>
-      </View>
+      </SystemScreen>
     </Modal>
   );
 };
@@ -894,7 +899,8 @@ const CounterEditor = ({
 };
 
 export const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.canvas, paddingTop: 52 },
+  root: { flex: 1, backgroundColor: colors.canvas },
+  mobileModal: { flex: 1, backgroundColor: colors.canvas },
   desktopBackdrop: { backgroundColor: 'rgba(15, 23, 42, 0.35)', flex: 1 },
   desktopPanel: {
     borderRightColor: colors.border,
@@ -1023,52 +1029,11 @@ export const styles = StyleSheet.create({
     fontSize: 14,
   },
   segmented: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 14 },
-  segment: {
-    flexGrow: 1,
-    flexBasis: '45%',
-    borderColor: colors.border,
-    borderWidth: 1,
-    padding: 10,
-    alignItems: 'center',
-  },
   segmentSelected: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
-  segmentText: { color: colors.text, fontWeight: '700' },
   segmentTextSelected: { color: '#fff' },
-  switchRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    minHeight: 42,
-  },
-  switchLabel: { color: colors.text, flexShrink: 1, fontSize: 13 },
-  leader: { flex: 1, justifyContent: 'center', marginHorizontal: 8 },
-  leaderLine: {
-    borderBottomColor: '#c9d1dc',
-    borderBottomWidth: 1,
-    borderRadius: 1,
-    borderStyle: 'dotted',
-  },
-  hintButton: {
-    alignItems: 'center',
-    borderColor: colors.border,
-    borderRadius: 9,
-    borderWidth: 1,
-    height: 18,
-    justifyContent: 'center',
-    marginLeft: 6,
-    width: 18,
-  },
-  hintIcon: { color: colors.muted, fontSize: 11, fontWeight: '700' },
-  hintText: {
-    color: colors.muted,
-    fontSize: 12,
-    lineHeight: 16,
-    marginBottom: 8,
-    paddingRight: 8,
-  },
   configGroup: { marginTop: 4 },
   aggregationChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   aggregationChoice: {

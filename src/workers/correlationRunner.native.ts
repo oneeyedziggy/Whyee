@@ -1,8 +1,4 @@
-import {
-  createWorkletRuntime,
-  runOnRuntimeAsync,
-  type WorkletRuntime,
-} from 'react-native-worklets';
+import type * as ReactNativeWorklets from 'react-native-worklets';
 import {
   computePreparedCorrelationRange,
   getPreparedCorrelationCellCount,
@@ -11,6 +7,7 @@ import {
   type PreparedCorrelation,
 } from '../lib/correlationKernel';
 import { CorrelationCancelledError } from '../lib/correlationEngine';
+import { createCorrelationTask } from './correlationTask';
 import type {
   CorrelationBatchListener,
   CorrelationCellResult,
@@ -26,14 +23,29 @@ declare global {
 }
 
 const maximumWorkerCount = 3;
-const chunkSize = 64;
-let workerPool: WorkletRuntime[] | null = null;
+const chunkSize = 128;
+let workletsModule: typeof ReactNativeWorklets | null | undefined;
+let workerPool: ReactNativeWorklets.WorkletRuntime[] | null = null;
 let nextGeneration = 1;
 
-const getWorkerPool = (): WorkletRuntime[] => {
+const getWorklets = (): typeof ReactNativeWorklets | null => {
+  if (workletsModule !== undefined) return workletsModule;
+  try {
+    workletsModule = require(
+      'react-native-worklets',
+    ) as typeof ReactNativeWorklets;
+  } catch {
+    workletsModule = null;
+  }
+  return workletsModule ?? null;
+};
+
+const getWorkerPool = (
+  worklets: typeof ReactNativeWorklets,
+): ReactNativeWorklets.WorkletRuntime[] => {
   if (!workerPool) {
     workerPool = Array.from({ length: maximumWorkerCount }, (_, index) =>
-      createWorkletRuntime({ name: `correlation-${index + 1}` }),
+      worklets.createWorkletRuntime({ name: `correlation-${index + 1}` }),
     );
   }
   return workerPool;
@@ -62,6 +74,16 @@ export const runCorrelation = (
   request: CorrelationRequest,
   onBatch?: CorrelationBatchListener,
 ): CorrelationTask => {
+  if (
+    request.records.length === 0 ||
+    request.categories.length < 2 ||
+    request.offsets.length === 0
+  ) {
+    return { promise: Promise.resolve([]), cancel: () => undefined };
+  }
+  const worklets = getWorklets();
+  if (!worklets) return createCorrelationTask(request, onBatch);
+
   const generation = nextGeneration;
   nextGeneration += 1;
   let cancelled = false;
@@ -69,8 +91,8 @@ export const runCorrelation = (
   let rejectTask: ((reason?: unknown) => void) | null = null;
 
   const execute = async (): Promise<CorrelationRow[]> => {
-    const pool = getWorkerPool();
-    const prepared = await runOnRuntimeAsync(
+    const pool = getWorkerPool(worklets);
+    const prepared = await worklets.runOnRuntimeAsync(
       pool[0],
       prepareCorrelation,
       request,
@@ -84,7 +106,7 @@ export const runCorrelation = (
     );
     await Promise.all(
       activeWorkers.map((runtime) =>
-        runOnRuntimeAsync(
+        worklets.runOnRuntimeAsync(
           runtime,
           installPreparedCorrelation,
           generation,
@@ -97,12 +119,14 @@ export const runCorrelation = (
     let nextStart = 0;
     let completed = 0;
     const cells: CorrelationCellResult[] = [];
-    const runWorker = async (runtime: WorkletRuntime): Promise<void> => {
+    const runWorker = async (
+      runtime: ReactNativeWorklets.WorkletRuntime,
+    ): Promise<void> => {
       while (!cancelled) {
         const start = nextStart;
         if (start >= total) return;
         nextStart += chunkSize;
-        const batchCells = await runOnRuntimeAsync(
+        const batchCells = await worklets.runOnRuntimeAsync(
           runtime,
           computeInstalledRange,
           generation,

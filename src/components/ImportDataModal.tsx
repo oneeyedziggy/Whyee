@@ -20,6 +20,7 @@ import {
 import { pickTransferFile } from '../lib/dataTransferFile';
 import { colors } from '../theme/tokens';
 import { WorkspacePicker } from './WorkspacePicker';
+import { SystemScreen } from './SystemScreen';
 import type {
   ConflictResolution,
   GlobalTransferSnapshot,
@@ -227,10 +228,11 @@ export const ImportDataModal = ({
     <Modal
       visible={visible}
       animationType="slide"
-      presentationStyle="pageSheet"
+      statusBarTranslucent
+      presentationStyle="fullScreen"
       onRequestClose={onClose}
     >
-      <View style={styles.root}>
+      <SystemScreen style={styles.root}>
         <View style={styles.header}>
           <View style={styles.headerCopy}>
             <Text style={styles.title}>Import data</Text>
@@ -417,7 +419,7 @@ export const ImportDataModal = ({
             </Text>
           </Pressable>
         ) : null}
-      </View>
+      </SystemScreen>
     </Modal>
   );
 };
@@ -443,7 +445,7 @@ const ChoiceButton = ({
 );
 
 const styles = StyleSheet.create({
-  root: { backgroundColor: colors.canvas, flex: 1, paddingTop: 48 },
+  root: { backgroundColor: colors.canvas, flex: 1 },
   header: {
     alignItems: 'center',
     flexDirection: 'row',

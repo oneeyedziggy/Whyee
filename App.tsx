@@ -1,5 +1,4 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { StatusBar } from 'expo-status-bar';
 import { ChevronLeft, ChevronRight, Settings } from 'lucide-react-native';
 import {
   startTransition,
@@ -19,7 +18,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { CategoryEditor } from './src/components/CategoryEditor';
 import { CategoryInputCard } from './src/components/CategoryInputCard';
 import { ChartsPanel } from './src/components/ChartsPanel';
@@ -52,6 +51,7 @@ import {
 import { WorkspacePicker } from './src/components/WorkspacePicker';
 import { WorkspaceManagerModal } from './src/components/WorkspaceManagerModal';
 import { DatePickerModal } from './src/components/DatePickerModal';
+import { SystemScreen } from './src/components/SystemScreen';
 import { confirmAction } from './src/lib/confirm';
 import {
   createWorkspaceId,
@@ -89,6 +89,7 @@ import type {
 const createOffsets = (maximum: number): number[] =>
   Array.from({ length: maximum + 1 }, (_, index) => index);
 const cachePrefix = 'correlation.mobile.v5.cache.';
+const correlationPublishIntervalMs = 120;
 type MobilePage = 'daily' | 'stats';
 
 const initialCategories = (): CategoryDefinition[] => [
@@ -107,6 +108,7 @@ const App = () => {
   const [workspaceManagerOpen, setWorkspaceManagerOpen] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [page, setPage] = useState<MobilePage>('daily');
+  const [statsRenderStage, setStatsRenderStage] = useState(0);
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
   const [selectedGroupId, setSelectedGroupId] = useState('default-group');
@@ -181,6 +183,27 @@ const App = () => {
     366,
     Math.max(1, Math.round(summaryLookback)),
   );
+  const statsVisible = desktop || page === 'stats';
+
+  useEffect(() => {
+    if (!statsVisible) {
+      setStatsRenderStage(0);
+      return undefined;
+    }
+    let active = true;
+    let frame = requestAnimationFrame(function revealNextSection() {
+      if (!active) return;
+      setStatsRenderStage((current) => {
+        if (current >= 5) return current;
+        frame = requestAnimationFrame(revealNextSection);
+        return current + 1;
+      });
+    });
+    return () => {
+      active = false;
+      cancelAnimationFrame(frame);
+    };
+  }, [activeWorkspaceId, statsVisible]);
   const offsets = useMemo(
     () => createOffsets(safeCorrelationOffset),
     [safeCorrelationOffset],
@@ -576,7 +599,10 @@ const App = () => {
   ]);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || !statsVisible) {
+      setLoading(false);
+      return;
+    }
     if (
       !isStatisticEnabled(statisticsSettings, 'correlation.section') &&
       !isStatisticEnabled(statisticsSettings, 'correlation.top-matches')
@@ -688,7 +714,10 @@ const App = () => {
             accumulatedRows.set(key, accumulated);
           }
           if (!publicationTimer)
-            publicationTimer = setTimeout(publishAccumulatedRows, 32);
+            publicationTimer = setTimeout(
+              publishAccumulatedRows,
+              correlationPublishIntervalMs,
+            );
         });
         return correlationTask.promise.then((nextRows) => {
           if (!active) return null;
@@ -728,6 +757,7 @@ const App = () => {
     offsets,
     records,
     statisticsSettings,
+    statsVisible,
   ]);
 
   useEffect(() => {
@@ -736,14 +766,21 @@ const App = () => {
       isStatisticEnabled(statisticsSettings, 'summary.weekly-effect') ||
       isStatisticEnabled(statisticsSettings, 'summary.weekly-phase') ||
       isStatisticEnabled(statisticsSettings, 'summary.weekly-offset');
-    if (!hydrated || !needsWeeklyEffects) {
+    if (!hydrated || !statsVisible || !needsWeeklyEffects) {
       setWeeklyEffects([]);
       return;
     }
     setWeeklyEffects(
       calculateWeeklyEffects(enabledCategories, records, offsets),
     );
-  }, [enabledCategories, hydrated, offsets, records, statisticsSettings]);
+  }, [
+    enabledCategories,
+    hydrated,
+    offsets,
+    records,
+    statisticsSettings,
+    statsVisible,
+  ]);
 
   const changeDay = (offset: number) =>
     setSelectedDate((current) => {
@@ -1042,11 +1079,22 @@ const App = () => {
     );
 
   const dailyPanel = (
-    <Panel
-      title="Daily entry"
-      subtitle="Select a value for each category."
-      infoSection="daily-input"
-    >
+    <View style={styles.dailyPage}>
+      {!desktop ? (
+        <Pressable
+          accessibilityLabel="Open category editor"
+          accessibilityRole="button"
+          onPress={() => setEditorOpen(true)}
+          style={styles.dailyEditButton}
+        >
+          <Text style={styles.dailyEditButtonText}>Edit categories</Text>
+        </Pressable>
+      ) : null}
+      <Panel
+        title="Daily entry"
+        subtitle="Select a value for each category."
+        infoSection="daily-input"
+      >
       <View style={styles.categoryIndex}>
         <Pressable
           accessibilityRole="button"
@@ -1126,7 +1174,8 @@ const App = () => {
           Open the category editor to add your first category.
         </Text>
       )}
-    </Panel>
+      </Panel>
+    </View>
   );
   const statisticsPanel = (
     <View style={styles.statistics}>
@@ -1137,14 +1186,17 @@ const App = () => {
           onPress={() => setStatisticsSettingsOpen(true)}
         />
       </View>
-      {isStatisticEnabled(statisticsSettings, 'chart.section') ? (
+      {statsRenderStage >= 1 &&
+      isStatisticEnabled(statisticsSettings, 'chart.section') ? (
         <ChartsPanel categories={enabledCategories} records={records} />
       ) : null}
-      {isStatisticEnabled(statisticsSettings, 'chart.section') &&
+      {statsRenderStage >= 2 &&
+      isStatisticEnabled(statisticsSettings, 'chart.section') &&
       isStatisticEnabled(statisticsSettings, 'correlation.section') ? (
         <View style={styles.sectionGap} />
       ) : null}
-      {isStatisticEnabled(statisticsSettings, 'summary.section') ? (
+      {statsRenderStage >= 2 &&
+      isStatisticEnabled(statisticsSettings, 'summary.section') ? (
         <SummaryPanel
           categories={enabledCategories}
           records={records}
@@ -1153,11 +1205,13 @@ const App = () => {
           weeklyEffects={weeklyEffects}
         />
       ) : null}
-      {isStatisticEnabled(statisticsSettings, 'summary.section') &&
+      {statsRenderStage >= 3 &&
+      isStatisticEnabled(statisticsSettings, 'summary.section') &&
       isStatisticEnabled(statisticsSettings, 'correlation.section') ? (
         <View style={styles.sectionGap} />
       ) : null}
-      {isStatisticEnabled(statisticsSettings, 'weekly.section') &&
+      {statsRenderStage >= 3 &&
+      isStatisticEnabled(statisticsSettings, 'weekly.section') &&
       weeklyEffects.length ? (
         <Panel
           title="Weekly effects"
@@ -1182,18 +1236,21 @@ const App = () => {
           ))}
         </Panel>
       ) : null}
-      {isStatisticEnabled(statisticsSettings, 'correlation.top-matches') ? (
+      {statsRenderStage >= 4 &&
+      isStatisticEnabled(statisticsSettings, 'correlation.top-matches') ? (
         <TopCorrelationsPanel
           rows={orderedRows}
           threshold={safeTopCorrelationThreshold}
           onThresholdChange={setTopCorrelationThreshold}
         />
       ) : null}
-      {isStatisticEnabled(statisticsSettings, 'correlation.top-matches') &&
+      {statsRenderStage >= 5 &&
+      isStatisticEnabled(statisticsSettings, 'correlation.top-matches') &&
       isStatisticEnabled(statisticsSettings, 'correlation.section') ? (
         <View style={styles.sectionGap} />
       ) : null}
-      {isStatisticEnabled(statisticsSettings, 'correlation.section') ? (
+      {statsRenderStage >= 5 &&
+      isStatisticEnabled(statisticsSettings, 'correlation.section') ? (
         <CorrelationPanel
           rows={orderedRows}
           loading={loading}
@@ -1222,89 +1279,112 @@ const App = () => {
     </View>
   );
 
+  const editCategoriesControl = (
+    <Pressable
+      accessibilityLabel="Open category editor"
+      accessibilityRole="button"
+      onPress={() => setEditorOpen(true)}
+      style={[styles.menuButton, !desktop && styles.menuButtonMobile]}
+    >
+      <Text style={[styles.menuText, !desktop && styles.menuTextMobile]}>
+        {desktop ? 'Edit categories' : 'Edit\ncategories'}
+      </Text>
+    </Pressable>
+  );
+  const dateNavigationControl = (
+    <View style={desktop ? styles.titleArea : styles.titleAreaMobile}>
+      <View style={styles.dateNavRow}>
+        <Pressable
+          accessibilityLabel="Previous day"
+          accessibilityRole="button"
+          onPress={() => changeDay(-1)}
+          style={[styles.dateNavButton, !desktop && styles.dateNavButtonMobile]}
+        >
+          <ChevronLeft color={colors.primary} size={20} />
+        </Pressable>
+        <Pressable
+          accessibilityLabel="Open date picker"
+          accessibilityRole="button"
+          onPress={() => setDatePickerOpen(true)}
+        >
+          <Text numberOfLines={1} style={styles.date}>
+            {selectedDateLabel}
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityLabel="Next day"
+          accessibilityRole="button"
+          disabled={selectedDateKey === todayKey}
+          onPress={() => changeDay(1)}
+          style={[styles.dateNavButton, !desktop && styles.dateNavButtonMobile]}
+        >
+          <ChevronRight
+            color={selectedDateKey === todayKey ? '#a6b1c0' : colors.primary}
+            size={20}
+          />
+        </Pressable>
+      </View>
+      {selectedDateKey !== todayKey ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setSelectedDate(new Date())}
+          style={styles.jumpToTodayButton}
+        >
+          <Text style={styles.jumpToToday}>Jump to today</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+  const headerUtilityControls = (
+    <View style={styles.headerUtilities}>
+      <InfoLink
+        compact={!desktop}
+        section="categories"
+        label="Open category and tracker documentation"
+      />
+      <Pressable
+        accessibilityLabel="Open settings"
+        accessibilityRole="button"
+        onPress={() => setSettingsOpen(true)}
+        style={[styles.settingsButton, !desktop && styles.settingsButtonMobile]}
+      >
+        <Settings color={colors.primary} size={20} />
+      </Pressable>
+    </View>
+  );
+
   if (!hydrated)
     return (
       <SafeAreaProvider>
-        <SafeAreaView style={styles.loading}>
-          <StatusBar style="dark" />
+        <SystemScreen backgroundColor="#eaf0f7" style={styles.loading}>
           <Text style={styles.loadingText}>Loading your tracker...</Text>
-        </SafeAreaView>
+        </SystemScreen>
       </SafeAreaProvider>
     );
 
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={styles.root}>
-        <StatusBar style="dark" />
+      <SystemScreen backgroundColor="#eaf0f7" style={styles.root}>
         <View style={styles.header}>
-          <View style={styles.headerTop}>
-            <View style={styles.headerSide}>
-              <Pressable
-                accessibilityLabel="Open category editor"
-                accessibilityRole="button"
-                onPress={() => setEditorOpen(true)}
-                style={styles.menuButton}
-              >
-                <Text style={styles.menuText}>Edit categories</Text>
-              </Pressable>
-            </View>
-            <View style={styles.titleArea}>
-              <View style={styles.dateNavRow}>
-                <Pressable
-                  accessibilityLabel="Previous day"
-                  accessibilityRole="button"
-                  onPress={() => changeDay(-1)}
-                  style={styles.dateNavButton}
-                >
-                  <ChevronLeft color={colors.primary} size={20} />
-                </Pressable>
-                <Pressable
-                  accessibilityLabel="Open date picker"
-                  accessibilityRole="button"
-                  onPress={() => setDatePickerOpen(true)}
-                >
-                  <Text style={styles.date}>{selectedDateLabel}</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityLabel="Next day"
-                  accessibilityRole="button"
-                  disabled={selectedDateKey === todayKey}
-                  onPress={() => changeDay(1)}
-                  style={styles.dateNavButton}
-                >
-                  <ChevronRight
-                    color={
-                      selectedDateKey === todayKey ? '#a6b1c0' : colors.primary
-                    }
-                    size={20}
-                  />
-                </Pressable>
+          <View style={[styles.headerTop, !desktop && styles.headerTopMobile]}>
+            {desktop ? (
+              <>
+                <View style={styles.headerSide}>{editCategoriesControl}</View>
+                {dateNavigationControl}
+                <View style={[styles.headerSide, styles.headerSideRight]}>
+                  {headerUtilityControls}
+                </View>
+              </>
+            ) : (
+              <View style={styles.mobileHeaderRow}>
+                {dateNavigationControl}
+                <View style={styles.mobileHeaderUtilities}>
+                  {headerUtilityControls}
+                </View>
               </View>
-              {selectedDateKey !== todayKey ? (
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => setSelectedDate(new Date())}
-                >
-                  <Text style={styles.jumpToToday}>Jump to today</Text>
-                </Pressable>
-              ) : null}
-            </View>
-            <View style={[styles.headerSide, styles.headerSideRight]}>
-              <InfoLink
-                section="categories"
-                label="Open category and tracker documentation"
-              />
-              <Pressable
-                accessibilityLabel="Open settings"
-                accessibilityRole="button"
-                onPress={() => setSettingsOpen(true)}
-                style={styles.settingsButton}
-              >
-                <Settings color={colors.primary} size={20} />
-              </Pressable>
-            </View>
+            )}
           </View>
-          <View style={styles.modeRow}>
+          <View style={[styles.modeRow, !desktop && styles.modeRowMobile]}>
             <WorkspacePicker
               options={pickableWorkspaces.map((workspace) => ({
                 id: workspace.id,
@@ -1423,7 +1503,7 @@ const App = () => {
           onSelect={setSelectedDate}
           onClose={() => setDatePickerOpen(false)}
         />
-      </SafeAreaView>
+      </SystemScreen>
     </SafeAreaProvider>
   );
 };
@@ -1464,8 +1544,17 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   headerTop: { flexDirection: 'row', alignItems: 'center' },
+  headerTopMobile: { alignItems: 'stretch', flexDirection: 'column' },
   headerSide: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   headerSideRight: { justifyContent: 'flex-end' },
+  mobileHeaderRow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+    position: 'relative',
+  },
+  mobileHeaderUtilities: { position: 'absolute', right: 0, top: 2 },
+  headerUtilities: { alignItems: 'center', flexDirection: 'row' },
   menuButton: {
     alignItems: 'center',
     backgroundColor: colors.primary,
@@ -1474,21 +1563,42 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
-  menuText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  menuButtonMobile: { height: 48, minWidth: 0, width: 112 },
+  menuText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 16,
+    textAlign: 'center',
+  },
+  menuTextMobile: { width: 88 },
   titleArea: { alignItems: 'center', flex: 1 },
+  titleAreaMobile: {
+    alignItems: 'center',
+    flexBasis: 'auto',
+    flexGrow: 0,
+    flexShrink: 0,
+    maxWidth: '72%',
+    marginTop: 0,
+  },
   dateNavRow: { alignItems: 'center', flexDirection: 'row', gap: 4 },
   dateNavButton: {
     alignItems: 'center',
-    height: 32,
+    height: 44,
     justifyContent: 'center',
-    width: 32,
+    width: 44,
   },
-  date: { color: colors.text, fontSize: 17, fontWeight: '700' },
+  dateNavButtonMobile: { height: 36, width: 36 },
+  date: { color: colors.text, fontSize: 17, fontWeight: '700', flexShrink: 1 },
   jumpToToday: {
     color: colors.primary,
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '700',
-    marginTop: 2,
+  },
+  jumpToTodayButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 24,
   },
   settingsButton: {
     alignItems: 'center',
@@ -1497,7 +1607,9 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     width: 40,
   },
+  settingsButtonMobile: { height: 36, marginLeft: 0, width: 36 },
   modeRow: { alignSelf: 'center', flexDirection: 'row', marginTop: 9 },
+  modeRowMobile: { marginTop: 10 },
   workspaceNotes: {
     color: colors.muted,
     fontSize: 12,
@@ -1515,6 +1627,16 @@ const styles = StyleSheet.create({
   pageTabText: { color: colors.muted, fontWeight: '700', fontSize: 13 },
   pageTabTextActive: { color: colors.primary },
   content: { padding: 14, paddingBottom: 34 },
+  dailyPage: { gap: 12 },
+  dailyEditButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: 6,
+    justifyContent: 'center',
+    minHeight: 48,
+    width: '100%',
+  },
+  dailyEditButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   desktopGrid: { flexDirection: 'row', gap: 18, alignItems: 'flex-start' },
   column: { flex: 1, gap: 18 },
   categoryNames: {

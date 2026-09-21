@@ -48,6 +48,20 @@ export const WorkspacePicker = ({
     );
     scroller?.scrollTo({ x: next, animated: true });
   };
+  const updateViewport = (event: {
+    nativeEvent?: { layout?: { width?: number } } | null;
+  }) => {
+    const viewport = event.nativeEvent?.layout?.width;
+    if (!Number.isFinite(viewport)) return;
+    setTrack((current) => ({ ...current, viewport: viewport as number }));
+  };
+  const updateOffset = (
+    event: NativeSyntheticEvent<NativeScrollEvent> | null,
+  ) => {
+    const offset = event?.nativeEvent?.contentOffset?.x;
+    if (!Number.isFinite(offset)) return;
+    setTrack((current) => ({ ...current, offset: offset as number }));
+  };
 
   return (
     <View style={styles.row}>
@@ -71,21 +85,11 @@ export const WorkspacePicker = ({
         scrollEventThrottle={16}
         style={styles.scroll}
         contentContainerStyle={styles.track}
-        onLayout={(event) =>
-          setTrack((current) => ({
-            ...current,
-            viewport: event.nativeEvent.layout.width,
-          }))
-        }
+        onLayout={updateViewport}
         onContentSizeChange={(content) =>
           setTrack((current) => ({ ...current, content }))
         }
-        onScroll={(event: NativeSyntheticEvent<NativeScrollEvent>) =>
-          setTrack((current) => ({
-            ...current,
-            offset: event.nativeEvent.contentOffset.x,
-          }))
-        }
+        onScroll={updateOffset}
       >
         {options.map((option) => {
           const active = option.id === selectedId;
@@ -154,8 +158,10 @@ const styles = StyleSheet.create({
   button: {
     borderWidth: 1,
     borderColor: colors.border,
+    height: 44,
+    justifyContent: 'center',
     paddingHorizontal: 15,
-    paddingVertical: 6,
+    paddingVertical: 0,
   },
   buttonActive: {
     borderColor: colors.primary,

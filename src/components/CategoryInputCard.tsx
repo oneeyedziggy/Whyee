@@ -18,18 +18,17 @@ import {
   makeRecordKey,
 } from '../lib/dates';
 import { confirmAction } from '../lib/confirm';
+import {
+  applyDurationPrecision,
+  editDurationStopTime,
+  stopDurationRecord,
+} from '../lib/durationTimers';
 import { scoreSentiment } from '../lib/sentiment';
 import { colors } from '../theme/tokens';
 
 const SENTIMENT_DEBOUNCE_MS = 900;
 
 // Sub-second precision is retained on the record but hidden from every derived number.
-const applyPrecision = (
-  milliseconds: number,
-  showMilliseconds: boolean,
-): number =>
-  showMilliseconds ? milliseconds : Math.round(milliseconds / 1000) * 1000;
-
 interface CategoryInputCardProps {
   category: CategoryDefinition;
   entries: CategorySelectionRecord[];
@@ -37,6 +36,7 @@ interface CategoryInputCardProps {
   onChange: (entry: CategorySelectionRecord) => void;
   onAddEntry: (initial?: Partial<CategorySelectionRecord>) => void;
   onDeleteEntry?: (entry: CategorySelectionRecord) => void;
+  activeDurationRecordKey?: string;
 }
 
 // Patch must land after the existing entry so edits are never overwritten by stale fields.
@@ -68,6 +68,7 @@ export const CategoryInputCard = ({
   onChange,
   onAddEntry,
   onDeleteEntry,
+  activeDurationRecordKey,
 }: CategoryInputCardProps) => {
   const entryList = entries.length ? entries : [null];
   const splitOwnsNewEntry =
@@ -88,6 +89,7 @@ export const CategoryInputCard = ({
           onChange={onChange}
           onAddEntry={onAddEntry}
           onDelete={entry ? () => onDeleteEntry?.(entry) : undefined}
+          activeDurationRecordKey={activeDurationRecordKey}
         />
       ))}
       {category.allowMultiplePerDay && !splitOwnsNewEntry ? (
@@ -113,6 +115,7 @@ const DailyEntry = ({
   onChange,
   onDelete,
   onAddEntry,
+  activeDurationRecordKey,
 }: {
   category: CategoryDefinition;
   entry: CategorySelectionRecord | null;
@@ -122,6 +125,7 @@ const DailyEntry = ({
   isLast: boolean;
   onChange: (entry: CategorySelectionRecord) => void;
   onAddEntry: (initial?: Partial<CategorySelectionRecord>) => void;
+  activeDurationRecordKey?: string;
   onDelete?: () => void;
 }) => {
   const selectedValue = entry?.value ?? null;
@@ -158,6 +162,9 @@ const DailyEntry = ({
         isLast={isLast}
         onChange={onChange}
         onAddEntry={onAddEntry}
+        blocked={Boolean(
+          activeDurationRecordKey && entry?.key !== activeDurationRecordKey,
+        )}
       />
     ) : category.kind === 'counter' ? (
       <CounterInput
@@ -406,6 +413,7 @@ const DurationInput = ({
   isLast,
   onChange,
   onAddEntry,
+  blocked,
 }: {
   category: Extract<CategoryDefinition, { kind: 'duration' }>;
   entry: CategorySelectionRecord | null;
@@ -415,6 +423,7 @@ const DurationInput = ({
   isLast: boolean;
   onChange: (entry: CategorySelectionRecord) => void;
   onAddEntry: (initial?: Partial<CategorySelectionRecord>) => void;
+  blocked: boolean;
 }) => {
   const [now, setNow] = useState(Date.now());
   const [notice, setNotice] = useState('');
@@ -434,8 +443,8 @@ const DurationInput = ({
     patchEntry({
       ...patch,
       durationMsExact: exact,
-      durationMs: applyPrecision(exact, showMilliseconds),
-      value: applyPrecision(exact, showMilliseconds),
+      durationMs: applyDurationPrecision(exact, showMilliseconds),
+      value: applyDurationPrecision(exact, showMilliseconds),
     });
   // Restarting keeps whatever has already been banked; only Reset clears it.
   const start = () => {
@@ -450,20 +459,8 @@ const DurationInput = ({
   };
   const stop = () => {
     if (!entry?.startTime) return;
-    const stoppedAt = new Date();
-    const lapMs = stoppedAt.getTime() - Date.parse(entry.startTime);
-    const durationRuns = [
-      ...(entry.durationRuns ?? []),
-      {
-        startTime: entry.startTime,
-        stopTime: stoppedAt.toISOString(),
-        durationMs: lapMs,
-      },
-    ];
-    storeTotal(
-      durationRuns.reduce((sum, run) => sum + run.durationMs, 0),
-      { stopTime: stoppedAt.toISOString(), durationRuns },
-    );
+    const next = stopDurationRecord(entry, new Date(), showMilliseconds);
+    if (next) onChange(next);
   };
   const reset = () => {
     if (!entry) return;
@@ -515,6 +512,11 @@ const DurationInput = ({
       return;
     }
     setNotice('');
+    if (field === 'stopTime') {
+      const next = editDurationStopTime(entry, value, showMilliseconds);
+      if (next) onChange(next);
+      return;
+    }
     const next = { ...entry, [field]: value.toISOString() };
     const exact =
       startMs !== null && stopMs !== null
@@ -523,8 +525,8 @@ const DurationInput = ({
     onChange({
       ...next,
       durationMsExact: exact,
-      durationMs: applyPrecision(exact, showMilliseconds),
-      value: applyPrecision(exact, showMilliseconds),
+      durationMs: applyDurationPrecision(exact, showMilliseconds),
+      value: applyDurationPrecision(exact, showMilliseconds),
     });
   };
   const showLap =
@@ -536,7 +538,7 @@ const DurationInput = ({
       <View style={styles.primaryValueRow}>
         <Text style={styles.durationValue}>
           {formatDuration(
-            applyPrecision(totalMs, showMilliseconds),
+            applyDurationPrecision(totalMs, showMilliseconds),
             showMilliseconds,
           )}
         </Text>
@@ -544,7 +546,7 @@ const DurationInput = ({
           <Text style={styles.secondaryValue}>
             (
             {formatDuration(
-              applyPrecision(secondaryMs, showMilliseconds),
+              applyDurationPrecision(secondaryMs, showMilliseconds),
               showMilliseconds,
             )}
             )
@@ -553,30 +555,43 @@ const DurationInput = ({
       </View>
       <View style={styles.durationButtons}>
         <Pressable
-          disabled={running}
+          disabled={running || blocked}
           onPress={start}
-          style={[styles.actionButton, running && styles.disabledButton]}
+          style={[
+            styles.actionButton,
+            (running || blocked) && styles.disabledButton,
+          ]}
         >
           <Text style={styles.actionText}>Start</Text>
         </Pressable>
         <Pressable
-          disabled={!running}
+          disabled={!running || blocked}
           onPress={stop}
-          style={[styles.actionButton, !running && styles.disabledButton]}
+          style={[
+            styles.actionButton,
+            (!running || blocked) && styles.disabledButton,
+          ]}
         >
           <Text style={styles.actionText}>Stop</Text>
         </Pressable>
         {category.duration.splitEnabled && isLast ? (
           <Pressable
-            disabled={!running}
+            disabled={!running || blocked}
             onPress={split}
-            style={[styles.actionButton, !running && styles.disabledButton]}
+            style={[
+              styles.actionButton,
+              (!running || blocked) && styles.disabledButton,
+            ]}
           >
             <Text style={styles.actionText}>Split</Text>
           </Pressable>
         ) : null}
         {category.duration.resetEnabled && isLast ? (
-          <Pressable onPress={reset} style={styles.resetButton}>
+          <Pressable
+            disabled={blocked}
+            onPress={reset}
+            style={[styles.resetButton, blocked && styles.disabledButton]}
+          >
             <Text style={styles.resetText}>Reset</Text>
           </Pressable>
         ) : null}
@@ -592,6 +607,7 @@ const DurationInput = ({
             onChange={(value) => editTimestamp('startTime', value)}
             onReject={setNotice}
             rejectMessage="Start time cannot be later than the stop time."
+            disabled={blocked}
           />
           <TimeEditor
             label="Stop time"
@@ -601,6 +617,7 @@ const DurationInput = ({
             onChange={(value) => editTimestamp('stopTime', value)}
             onReject={setNotice}
             rejectMessage="Stop time cannot be earlier than the start time."
+            disabled={blocked}
           />
         </View>
       ) : null}
@@ -706,6 +723,7 @@ const TimeEditor = ({
   rejectMessage,
   onChange,
   onReject,
+  disabled = false,
 }: {
   label: string;
   timestamp?: string;
@@ -715,6 +733,7 @@ const TimeEditor = ({
   rejectMessage: string;
   onChange: (value: Date) => void;
   onReject: (message: string) => void;
+  disabled?: boolean;
 }) => {
   const initialDate = timestamp ? new Date(timestamp) : new Date();
   const [hours, setHours] = useState(initialDate.getHours());
@@ -854,6 +873,7 @@ const TimeEditor = ({
     <View style={styles.timeEditor}>
       <Text style={styles.help}>{label}</Text>
       <TextInput
+        editable={!disabled}
         value={text}
         onChangeText={parseText}
         placeholder={showMilliseconds ? 'HH:MM:SS.mmm' : 'HH:MM:SS'}
@@ -868,11 +888,14 @@ const TimeEditor = ({
             <View key={field} style={styles.stepper}>
               <Pressable
                 accessibilityLabel={`Increase ${label} ${stepLabels[field]}`}
-                disabled={!canIncrease}
+                disabled={disabled || !canIncrease}
                 onPress={() => adjust(field, 1)}
                 onPressIn={() => canIncrease && startRepeating(field, 1)}
                 onPressOut={stopRepeating}
-                style={[styles.stepButton, !canIncrease && styles.stepBlocked]}
+                style={[
+                  styles.stepButton,
+                  (disabled || !canIncrease) && styles.stepBlocked,
+                ]}
               >
                 <Text style={styles.stepText}>+</Text>
               </Pressable>
@@ -887,11 +910,14 @@ const TimeEditor = ({
               </Text>
               <Pressable
                 accessibilityLabel={`Decrease ${label} ${stepLabels[field]}`}
-                disabled={!canDecrease}
+                disabled={disabled || !canDecrease}
                 onPress={() => adjust(field, -1)}
                 onPressIn={() => canDecrease && startRepeating(field, -1)}
                 onPressOut={stopRepeating}
-                style={[styles.stepButton, !canDecrease && styles.stepBlocked]}
+                style={[
+                  styles.stepButton,
+                  (disabled || !canDecrease) && styles.stepBlocked,
+                ]}
               >
                 <Text style={styles.stepText}>-</Text>
               </Pressable>

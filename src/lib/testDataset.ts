@@ -67,6 +67,8 @@ const createCategory = (
   virtualSeries: [],
   weeklyEffectEnabled: false,
   multiSelect: false,
+  optionSeriesMode: 'intensity',
+  optionOccurrenceMode: 'capped',
   options: createOptions(optionCount),
 });
 const createDateWindow = (): string[] =>

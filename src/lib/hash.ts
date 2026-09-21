@@ -39,6 +39,7 @@ export const createCorrelationInputHash = (
   offsets: number[] = [],
   includeCalendar = true,
   groups: CategoryGroup[] = [],
+  asOf?: number,
 ): string =>
   hashString(
     JSON.stringify({
@@ -48,6 +49,7 @@ export const createCorrelationInputHash = (
       records: digestRecords(records),
       offsets,
       includeCalendar,
+      asOf,
       groups: [...groups]
         .map((group) => ({
           ...group,

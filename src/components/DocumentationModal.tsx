@@ -15,6 +15,7 @@ import {
   type DocumentationSectionId,
 } from '../lib/documentation';
 import { colors } from '../theme/tokens';
+import { SystemScreen } from './SystemScreen';
 
 interface DocumentationModalProps {
   visible: boolean;
@@ -68,10 +69,14 @@ export const DocumentationModal = ({
     <Modal
       visible={visible}
       animationType="slide"
+      statusBarTranslucent
       onRequestClose={onClose}
-      presentationStyle="pageSheet"
+      presentationStyle="fullScreen"
     >
-      <View accessibilityViewIsModal style={styles.root}>
+      <SystemScreen
+        accessibilityViewIsModal
+        style={styles.root}
+      >
         <View style={styles.header}>
           <View>
             <Text style={styles.title}>Documentation</Text>
@@ -135,13 +140,13 @@ export const DocumentationModal = ({
           )}
           <View style={{ height }} />
         </ScrollView>
-      </View>
+      </SystemScreen>
     </Modal>
   );
 };
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.canvas, paddingTop: 48 },
+  root: { flex: 1, backgroundColor: colors.canvas },
   header: {
     alignItems: 'center',
     flexDirection: 'row',

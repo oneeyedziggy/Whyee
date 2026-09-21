@@ -2,6 +2,7 @@ import { createId } from './id';
 import type {
   CategoryDefinition,
   CategoryKind,
+  ChoiceCategory,
   ChoiceOption,
   NumericCategory,
   SummaryVerb,
@@ -31,10 +32,27 @@ export const makeInverseSeries = (
   transform: 'inverse',
 });
 
+const getOptionVirtualSeries = (
+  category: ChoiceCategory,
+): VirtualSeriesDefinition[] =>
+  category.options.map((option) => ({
+    id: `${category.id}:option:${option.id}`,
+    name: `${category.name}: ${option.label}`,
+    sourceCategoryId: category.id,
+    field: 'optionSelected',
+    optionValue: option.value,
+    aggregation: category.optionOccurrenceMode === 'sum' ? 'sum' : 'max',
+  }));
+
 const getBaseVirtualSeries = (
   category: CategoryDefinition,
 ): VirtualSeriesDefinition[] => {
   if (category.kind === 'notes') return [];
+  if (
+    category.kind === 'multiple-choice' &&
+    category.optionSeriesMode === 'items'
+  )
+    return getOptionVirtualSeries(category);
   if (category.kind === 'duration' || category.kind === 'counter')
     return getDefaultVirtualSeries(category.id, category.name, category.kind);
   if (category.allowMultiplePerDay)
@@ -76,7 +94,11 @@ export const recomputeVirtualSeries = (
 const createVirtualSeries = (
   categoryId: string,
   name: string,
-  field: 'startTime' | 'stopTime' | 'durationMs',
+  field:
+    | 'startTime'
+    | 'stopTime'
+    | 'durationMs'
+    | 'durationHoursByDay',
   aggregation: SummaryVerb,
 ): VirtualSeriesDefinition => ({
   id: `${categoryId}:${field}:${aggregation}`,
@@ -97,6 +119,12 @@ export const getDefaultVirtualSeries = (
         categoryId,
         `${name} total duration`,
         'durationMs',
+        'sum',
+      ),
+      createVirtualSeries(
+        categoryId,
+        `${name} hours by day`,
+        'durationHoursByDay',
         'sum',
       ),
       {
@@ -283,6 +311,8 @@ export const createDefaultCategory = (
       virtualSeries: [],
       multiSelect: false,
       weeklyEffectEnabled: false,
+      optionSeriesMode: 'intensity',
+      optionOccurrenceMode: 'capped',
       options: normalizeChoiceOptions([
         createChoiceOption(0),
         createChoiceOption(1),
@@ -414,6 +444,14 @@ const switchKindShape = (
         category.kind === 'multiple-choice' || category.kind === 'number'
           ? category.weeklyEffectEnabled
           : false,
+      optionSeriesMode:
+        category.kind === 'multiple-choice'
+          ? category.optionSeriesMode
+          : 'intensity',
+      optionOccurrenceMode:
+        category.kind === 'multiple-choice'
+          ? category.optionOccurrenceMode
+          : 'capped',
       allowMultiplePerDay: category.allowMultiplePerDay,
       mainAggregation: category.mainAggregation,
       virtualSeries: category.allowMultiplePerDay

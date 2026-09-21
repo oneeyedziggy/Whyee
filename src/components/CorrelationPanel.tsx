@@ -15,6 +15,7 @@ import { Panel } from './Panel';
 import { SortHeader } from './SortHeader';
 
 const offsets = Array.from({ length: 32 }, (_, index) => index);
+const rowBatchSize = 24;
 
 // Hover shows the full pair on web; tapping expands it everywhere else.
 const PairLabel = ({ label }: { label: string }) => {
@@ -63,6 +64,7 @@ export const CorrelationPanel = ({
   }, [deferredRows]);
   const [sortColumn, setSortColumn] = useState('');
   const [sortDirection, setSortDirection] = useState<SortDirection>('default');
+  const [visibleRowCount, setVisibleRowCount] = useState(rowBatchSize);
   const selectSortColumn = (column: string) => {
     if (column !== sortColumn) {
       setSortColumn(column);
@@ -147,8 +149,8 @@ export const CorrelationPanel = ({
                 />
               ))}
             </View>
-            <ScrollView style={styles.body} nestedScrollEnabled>
-              {sortedRows.map((row) => (
+            <View>
+              {sortedRows.slice(0, visibleRowCount).map((row) => (
                 <View
                   key={`${row.leftCategoryId}:${row.rightCategoryId}`}
                   style={styles.row}
@@ -173,7 +175,21 @@ export const CorrelationPanel = ({
                   })}
                 </View>
               ))}
-            </ScrollView>
+              {visibleRowCount < sortedRows.length ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() =>
+                    setVisibleRowCount((current) => current + rowBatchSize)
+                  }
+                  style={styles.showMore}
+                >
+                  <Text style={styles.showMoreText}>
+                    Show more pairs ({sortedRows.length - visibleRowCount}{' '}
+                    remaining)
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
           </ScrollView>
         </View>
       ) : (
@@ -202,9 +218,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   header: { flexDirection: 'row', backgroundColor: '#eef3f8' },
-  body: {
-    maxHeight: 320,
-  },
+  showMore: { alignItems: 'center', minHeight: 44, justifyContent: 'center' },
+  showMoreText: { color: colors.primary, fontSize: 13, fontWeight: '700' },
   table: {
     borderColor: colors.border,
     borderRadius: 6,

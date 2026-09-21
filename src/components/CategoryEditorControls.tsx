@@ -1,8 +1,7 @@
-import { Pressable, Switch, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import * as React from 'react';
 import type { CategoryDefinition } from '../types/category';
 import { colors } from '../theme/tokens';
-import { styles } from './CategoryEditor';
 
 export const Segment = ({
   label,
@@ -91,3 +90,53 @@ export const SwitchRow = ({
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  caption: { color: colors.muted, fontSize: 12, marginTop: 2 },
+  segment: {
+    alignItems: 'center',
+    borderColor: colors.border,
+    borderWidth: 1,
+    flexBasis: '45%',
+    flexGrow: 1,
+    padding: 10,
+  },
+  segmentSelected: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  segmentText: { color: colors.text, fontWeight: '700' },
+  segmentTextSelected: { color: '#fff' },
+  switchRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 42,
+  },
+  switchLabel: { color: colors.text, flexShrink: 1, fontSize: 13 },
+  leader: { flex: 1, justifyContent: 'center', marginHorizontal: 8 },
+  leaderLine: {
+    borderBottomColor: '#c9d1dc',
+    borderBottomWidth: 1,
+    borderRadius: 1,
+    borderStyle: 'dotted',
+  },
+  hintButton: {
+    alignItems: 'center',
+    borderColor: colors.border,
+    borderRadius: 9,
+    borderWidth: 1,
+    height: 18,
+    justifyContent: 'center',
+    marginLeft: 6,
+    width: 18,
+  },
+  hintIcon: { color: colors.muted, fontSize: 11, fontWeight: '700' },
+  hintText: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 16,
+    marginBottom: 8,
+    paddingRight: 8,
+  },
+});

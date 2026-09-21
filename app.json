@@ -12,9 +12,7 @@
     },
     "android": {
       "package": "com.oneeyedziggy.correlationmobile",
-      "permissions": [
-        "SCHEDULE_EXACT_ALARM"
-      ],
+      "permissions": ["SCHEDULE_EXACT_ALARM"],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -23,9 +21,12 @@
       },
       "predictiveBackGestureEnabled": false
     },
-    "plugins": [
-      "expo-sharing"
-    ],
+    "androidStatusBar": {
+      "backgroundColor": "#eaf0f7",
+      "barStyle": "dark-content",
+      "translucent": false
+    },
+    "plugins": ["expo-notifications", "expo-sharing"],
     "web": {
       "favicon": "./assets/favicon.png"
     },
