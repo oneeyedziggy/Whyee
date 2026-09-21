@@ -91,5 +91,4 @@ describe('WorkspacePicker', () => {
         .disabled,
     ).toBe(true);
   });
-
 });

@@ -1095,85 +1095,87 @@ const App = () => {
         subtitle="Select a value for each category."
         infoSection="daily-input"
       >
-      <View style={styles.categoryIndex}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ expanded: categoryIndexExpanded }}
-          onPress={() => setCategoryIndexExpanded(!categoryIndexExpanded)}
-          style={styles.dailyGroupHeader}
-        >
-          <Text style={styles.dailyGroupTitle}>Categories</Text>
-          <Text style={styles.dailyGroupChevron}>
-            {categoryIndexExpanded ? '\u2212' : '+'}
-          </Text>
-        </Pressable>
-        {categoryIndexExpanded ? (
-          <>
-            <View style={styles.categoryNames}>
-              {enabledCategories.map((category) => (
+        <View style={styles.categoryIndex}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: categoryIndexExpanded }}
+            onPress={() => setCategoryIndexExpanded(!categoryIndexExpanded)}
+            style={styles.dailyGroupHeader}
+          >
+            <Text style={styles.dailyGroupTitle}>Categories</Text>
+            <Text style={styles.dailyGroupChevron}>
+              {categoryIndexExpanded ? '\u2212' : '+'}
+            </Text>
+          </Pressable>
+          {categoryIndexExpanded ? (
+            <>
+              <View style={styles.categoryNames}>
+                {enabledCategories.map((category) => (
+                  <Pressable
+                    key={category.id}
+                    accessibilityRole="link"
+                    accessibilityLabel={`Jump to ${category.name}`}
+                    onPress={() => scrollToCategory(category.id)}
+                    style={styles.categoryChip}
+                  >
+                    <Text style={styles.categoryChipText}>{category.name}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </>
+          ) : null}
+        </View>
+        {enabledCategories.length ? (
+          dailySections.map((section) => {
+            const expanded = collapsedDailyGroups[section.id] !== true;
+            return (
+              <View key={section.id} style={styles.dailyGroup}>
                 <Pressable
-                  key={category.id}
-                  accessibilityRole="link"
-                  accessibilityLabel={`Jump to ${category.name}`}
-                  onPress={() => scrollToCategory(category.id)}
-                  style={styles.categoryChip}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded }}
+                  onPress={() =>
+                    setCollapsedDailyGroups((current) => ({
+                      ...current,
+                      [section.id]: expanded,
+                    }))
+                  }
+                  style={styles.dailyGroupHeader}
                 >
-                  <Text style={styles.categoryChipText}>{category.name}</Text>
+                  <Text style={styles.dailyGroupTitle}>{section.name}</Text>
+                  <Text style={styles.dailyGroupChevron}>
+                    {expanded ? '\u2212' : '+'}
+                  </Text>
                 </Pressable>
-              ))}
-            </View>
-          </>
-        ) : null}
-      </View>
-      {enabledCategories.length ? (
-        dailySections.map((section) => {
-          const expanded = collapsedDailyGroups[section.id] !== true;
-          return (
-            <View key={section.id} style={styles.dailyGroup}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ expanded }}
-                onPress={() =>
-                  setCollapsedDailyGroups((current) => ({
-                    ...current,
-                    [section.id]: expanded,
-                  }))
-                }
-                style={styles.dailyGroupHeader}
-              >
-                <Text style={styles.dailyGroupTitle}>{section.name}</Text>
-                <Text style={styles.dailyGroupChevron}>
-                  {expanded ? '\u2212' : '+'}
-                </Text>
-              </Pressable>
-              {expanded
-                ? section.categories.map((category) => (
-                    <View
-                      key={category.id}
-                      ref={(node) => {
-                        categoryAnchors.current[category.id] = node;
-                      }}
-                      collapsable={false}
-                    >
-                      <CategoryInputCard
-                        category={category}
-                        entries={entriesForCategory(category.id)}
-                        dateKey={selectedDateKey}
-                        onChange={updateEntry}
-                        onAddEntry={(initial) => addEntry(category.id, initial)}
-                        onDeleteEntry={deleteEntry}
-                      />
-                    </View>
-                  ))
-                : null}
-            </View>
-          );
-        })
-      ) : (
-        <Text style={styles.empty}>
-          Open the category editor to add your first category.
-        </Text>
-      )}
+                {expanded
+                  ? section.categories.map((category) => (
+                      <View
+                        key={category.id}
+                        ref={(node) => {
+                          categoryAnchors.current[category.id] = node;
+                        }}
+                        collapsable={false}
+                      >
+                        <CategoryInputCard
+                          category={category}
+                          entries={entriesForCategory(category.id)}
+                          dateKey={selectedDateKey}
+                          onChange={updateEntry}
+                          onAddEntry={(initial) =>
+                            addEntry(category.id, initial)
+                          }
+                          onDeleteEntry={deleteEntry}
+                        />
+                      </View>
+                    ))
+                  : null}
+              </View>
+            );
+          })
+        ) : (
+          <Text style={styles.empty}>
+            Open the category editor to add your first category.
+          </Text>
+        )}
       </Panel>
     </View>
   );

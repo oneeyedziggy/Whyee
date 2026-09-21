@@ -73,10 +73,7 @@ export const DocumentationModal = ({
       onRequestClose={onClose}
       presentationStyle="fullScreen"
     >
-      <SystemScreen
-        accessibilityViewIsModal
-        style={styles.root}
-      >
+      <SystemScreen accessibilityViewIsModal style={styles.root}>
         <View style={styles.header}>
           <View>
             <Text style={styles.title}>Documentation</Text>

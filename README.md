@@ -12,12 +12,12 @@ notifications, and JSON/ZIP backup and restore.
 ## Using the app
 
 1. Open **Daily** and select **Edit categories** to configure what you want to
-	track.
+   track.
 2. Enter values for the selected day. Use the date controls to review or edit
-	earlier days.
+   earlier days.
 3. Create separate workspaces for unrelated datasets or experiments.
 4. Open **Stats** to view charts, summaries, and correlations. Statistics can be
-	enabled or disabled from **Statistics settings**.
+   enabled or disabled from **Statistics settings**.
 5. Open the gear menu to import or export app data.
 
 Data, settings, and running duration timestamps are persisted locally. Most app
@@ -233,5 +233,5 @@ browser controls whether it asks for a location.
 - Built with Expo 57 (`app.json`), React Native, and TypeScript.
 - The preview APK build is configured in [eas.json](eas.json).
 - Do not rely on Expo Go alone for notifications, native Worklets, or final APK
-	behavior.
+  behavior.
 - See [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md) before making agent-driven changes.

@@ -31,9 +31,8 @@ let nextGeneration = 1;
 const getWorklets = (): typeof ReactNativeWorklets | null => {
   if (workletsModule !== undefined) return workletsModule;
   try {
-    workletsModule = require(
-      'react-native-worklets',
-    ) as typeof ReactNativeWorklets;
+    workletsModule =
+      require('react-native-worklets') as typeof ReactNativeWorklets;
   } catch {
     workletsModule = null;
   }

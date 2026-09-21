@@ -14,9 +14,7 @@ let handlerRegistered = false;
 const getNotifications = (): typeof ExpoNotifications | null => {
   if (notificationsModule !== undefined) return notificationsModule;
   try {
-    const loaded = require(
-      'expo-notifications',
-    ) as typeof ExpoNotifications;
+    const loaded = require('expo-notifications') as typeof ExpoNotifications;
     notificationsModule = loaded;
     if (!handlerRegistered) {
       loaded.setNotificationHandler({
@@ -97,16 +95,14 @@ const requestPermission = async (): Promise<boolean> => {
   const current = await notifications.getPermissionsAsync();
   if (
     current.granted ||
-    current.ios?.status ===
-      notifications.IosAuthorizationStatus.PROVISIONAL
+    current.ios?.status === notifications.IosAuthorizationStatus.PROVISIONAL
   ) {
     return true;
   }
   const requested = await notifications.requestPermissionsAsync();
   return (
     requested.granted ||
-    requested.ios?.status ===
-      notifications.IosAuthorizationStatus.PROVISIONAL
+    requested.ios?.status === notifications.IosAuthorizationStatus.PROVISIONAL
   );
 };
 
