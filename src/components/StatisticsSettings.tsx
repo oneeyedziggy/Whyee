@@ -4,7 +4,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -12,6 +11,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { InfoLink } from './InfoLink';
 import { SystemScreen } from './SystemScreen';
 import {
@@ -119,8 +119,9 @@ export const StatisticsSettings = ({
             placeholderTextColor={colors.placeholder}
             style={styles.search}
           />
-          <ScrollView
+          <KeyboardAwareScrollView
             contentContainerStyle={styles.content}
+            keyboardDismissMode="on-drag"
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator
           >
@@ -190,7 +191,7 @@ export const StatisticsSettings = ({
                 No statistics settings match that search.
               </Text>
             ) : null}
-          </ScrollView>
+          </KeyboardAwareScrollView>
         </View>
       </SystemScreen>
     </Modal>

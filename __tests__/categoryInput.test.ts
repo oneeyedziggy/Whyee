@@ -4,6 +4,17 @@ import { CategoryInputCard } from '../src/components/CategoryInputCard';
 import { createDefaultCategory } from '../src/lib/category';
 import type { CategorySelectionRecord } from '../src/types/category';
 
+jest.mock('lucide-react-native', () => ({
+  Calendar: () => null,
+  CalendarClock: () => null,
+  Clock: () => null,
+}));
+jest.mock('@react-native-community/datetimepicker', () => ({
+  __esModule: true,
+  default: () => null,
+  DateTimePickerAndroid: { open: jest.fn() },
+}));
+
 const dateKey = '2026-03-01';
 
 const makeEntry = (
@@ -52,7 +63,6 @@ describe('CategoryInputCard write-back', () => {
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ value: 15 }),
     );
-
   });
 
   it('resets a counter to zero', async () => {
@@ -71,7 +81,6 @@ describe('CategoryInputCard write-back', () => {
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ value: 0 }),
     );
-
   });
 
   it('keeps typed note text and the selected date on a brand new entry', async () => {
@@ -88,7 +97,58 @@ describe('CategoryInputCard write-back', () => {
         key: `${dateKey}:0:${category.id}`,
       }),
     );
+  });
 
+  it('starts a duration timer stamped to the viewed date, not necessarily today', async () => {
+    const category = createDefaultCategory('duration', 0);
+    if (category.kind !== 'duration') throw new Error('expected duration');
+    const onChange = jest.fn();
+    const screen = await renderCard(category, [], onChange);
+
+    fireEvent.press(screen.getByText('Start'));
+
+    const [patch] = onChange.mock.calls[0];
+    const [year, month, day] = dateKey.split('-').map(Number);
+    const startedAt = new Date(patch.startTime);
+    expect(startedAt.getFullYear()).toBe(year);
+    expect(startedAt.getMonth()).toBe(month - 1);
+    expect(startedAt.getDate()).toBe(day);
+    expect(patch.stopTime).toBeUndefined();
+  });
+
+  it('resumes a previously-stopped timer from the real current moment, not the viewed date again', async () => {
+    const category = createDefaultCategory('duration', 0);
+    if (category.kind !== 'duration') throw new Error('expected duration');
+    const onChange = jest.fn();
+    const screen = await renderCard(
+      category,
+      [
+        makeEntry(category.id, {
+          value: 60000,
+          durationMs: 60000,
+          startTime: `${dateKey}T09:00:00.000Z`,
+          stopTime: `${dateKey}T09:01:00.000Z`,
+          durationRuns: [
+            {
+              startTime: `${dateKey}T09:00:00.000Z`,
+              stopTime: `${dateKey}T09:01:00.000Z`,
+              durationMs: 60000,
+            },
+          ],
+        }),
+      ],
+      onChange,
+    );
+
+    fireEvent.press(screen.getByText('Start'));
+
+    const [patch] = onChange.mock.calls[0];
+    const realNow = new Date();
+    const resumedAt = new Date(patch.startTime);
+    expect(resumedAt.getFullYear()).toBe(realNow.getFullYear());
+    expect(resumedAt.getMonth()).toBe(realNow.getMonth());
+    expect(resumedAt.getDate()).toBe(realNow.getDate());
+    expect(patch.stopTime).toBeUndefined();
   });
 
   it('clears duration state on reset', async () => {
@@ -118,6 +178,5 @@ describe('CategoryInputCard write-back', () => {
         stopTime: undefined,
       }),
     );
-
   });
 });

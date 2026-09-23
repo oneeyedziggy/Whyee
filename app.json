@@ -12,7 +12,9 @@
     },
     "android": {
       "package": "com.oneeyedziggy.correlationmobile",
-      "permissions": ["SCHEDULE_EXACT_ALARM"],
+      "permissions": [
+        "SCHEDULE_EXACT_ALARM"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -26,7 +28,11 @@
       "barStyle": "dark-content",
       "translucent": false
     },
-    "plugins": ["expo-notifications", "expo-sharing"],
+    "plugins": [
+      "expo-notifications",
+      "expo-sharing",
+      "@react-native-community/datetimepicker"
+    ],
     "web": {
       "favicon": "./assets/favicon.png"
     },

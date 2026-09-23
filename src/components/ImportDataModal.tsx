@@ -6,11 +6,11 @@ import {
   Modal,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import {
   buildImportPlan,
   parseTransferArchive,
@@ -248,7 +248,10 @@ export const ImportDataModal = ({
             <X color={colors.text} size={21} />
           </Pressable>
         </View>
-        <ScrollView contentContainerStyle={styles.content}>
+        <KeyboardAwareScrollView
+          contentContainerStyle={styles.content}
+          keyboardDismissMode="on-drag"
+        >
           {!parsed ? (
             <Pressable
               accessibilityRole="button"
@@ -402,7 +405,7 @@ export const ImportDataModal = ({
             </>
           )}
           {error ? <Text style={styles.error}>{error}</Text> : null}
-        </ScrollView>
+        </KeyboardAwareScrollView>
         {parsed && !conflict ? (
           <Pressable
             accessibilityRole="button"

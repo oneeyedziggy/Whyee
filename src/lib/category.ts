@@ -94,11 +94,7 @@ export const recomputeVirtualSeries = (
 const createVirtualSeries = (
   categoryId: string,
   name: string,
-  field:
-    | 'startTime'
-    | 'stopTime'
-    | 'durationMs'
-    | 'durationHoursByDay',
+  field: 'startTime' | 'stopTime' | 'durationMs',
   aggregation: SummaryVerb,
 ): VirtualSeriesDefinition => ({
   id: `${categoryId}:${field}:${aggregation}`,
@@ -119,12 +115,6 @@ export const getDefaultVirtualSeries = (
         categoryId,
         `${name} total duration`,
         'durationMs',
-        'sum',
-      ),
-      createVirtualSeries(
-        categoryId,
-        `${name} hours by day`,
-        'durationHoursByDay',
         'sum',
       ),
       {
@@ -340,6 +330,7 @@ export const createDefaultCategory = (
         resetEnabled: true,
         cumulative: false,
         animate: true,
+        use24HourClock: true,
       },
       virtualSeries: getDefaultVirtualSeries(id, baseName, kind),
     };
@@ -487,6 +478,7 @@ const switchKindShape = (
         resetEnabled: true,
         cumulative: false,
         animate: true,
+        use24HourClock: true,
       },
       virtualSeries: getDefaultVirtualSeries(id, category.name, kind),
     };

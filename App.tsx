@@ -12,14 +12,29 @@ import {
   Button,
   Alert,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+} from 'react-native-gesture-handler';
+import Animated, {
+  clamp,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
+import type { KeyboardAwareScrollViewRef } from 'react-native-keyboard-controller';
+import { KeyboardProvider } from './src/components/KeyboardProvider';
 import { CategoryEditor } from './src/components/CategoryEditor';
+import { CarryoverTimerSection } from './src/components/CarryoverTimerSection';
 import { CategoryInputCard } from './src/components/CategoryInputCard';
 import { ChartsPanel } from './src/components/ChartsPanel';
 import { CorrelationPanel } from './src/components/CorrelationPanel';
@@ -41,6 +56,10 @@ import {
   getLocalTimeStamp,
   makeRecordKey,
 } from './src/lib/dates';
+import {
+  findCarryoverTimers,
+  getOldestRunningTimerByCategory,
+} from './src/lib/durationTimers';
 import { createCorrelationInputHash } from './src/lib/hash';
 import { createBuiltInTestDataset } from './src/lib/testDataset';
 import { createVirtualCorrelationInput } from './src/lib/virtualSeries';
@@ -108,6 +127,53 @@ const App = () => {
   const [workspaceManagerOpen, setWorkspaceManagerOpen] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [page, setPage] = useState<MobilePage>('daily');
+  // Stats panel is deferred one frame past initial mount on mobile so Daily paints first;
+  // both panels stay mounted afterward to support full drag-following swipe.
+  const [statsMounted, setStatsMounted] = useState(desktop);
+  useEffect(() => {
+    if (statsMounted) return undefined;
+    const frame = requestAnimationFrame(() => setStatsMounted(true));
+    return () => cancelAnimationFrame(frame);
+  }, [statsMounted]);
+  // 0 = Daily fully shown, -width = Stats fully shown; gesture drives this directly on the UI thread.
+  const pageTranslate = useSharedValue(0);
+  useEffect(() => {
+    pageTranslate.value = withTiming(page === 'daily' ? 0 : -width, {
+      duration: 220,
+    });
+  }, [page, width, pageTranslate]);
+  // Horizontal-only pan: activeOffsetX lets it win over vertical scroll gestures on the ScrollView.
+  const swipeGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-20, 20])
+        .failOffsetY([-15, 15])
+        .onUpdate((event) => {
+          if (desktop) return;
+          const base = page === 'daily' ? 0 : -width;
+          pageTranslate.value = clamp(base + event.translationX, -width, 0);
+        })
+        .onEnd((event) => {
+          if (desktop) return;
+          const shouldSwitch =
+            Math.abs(event.translationX) > width * 0.3 ||
+            Math.abs(event.velocityX) > 800;
+          const draggingToStats = pageTranslate.value < -width / 2;
+          const next = shouldSwitch
+            ? draggingToStats
+              ? 'stats'
+              : 'daily'
+            : page;
+          pageTranslate.value = withTiming(next === 'daily' ? 0 : -width, {
+            duration: 220,
+          });
+          if (next !== page) runOnJS(setPage)(next);
+        }),
+    [desktop, page, width, pageTranslate],
+  );
+  const pagerStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: pageTranslate.value }],
+  }));
   const [statsRenderStage, setStatsRenderStage] = useState(0);
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
@@ -183,13 +249,16 @@ const App = () => {
     366,
     Math.max(1, Math.round(summaryLookback)),
   );
-  const statsVisible = desktop || page === 'stats';
+  // Stats panel now stays mounted (both tabs support drag-following swipe), so heavy
+  // computation and the progressive reveal only need to run once it's first mounted, and
+  // restart when the workspace changes.
+  const statsVisible = statsMounted;
+  useEffect(() => {
+    setStatsRenderStage(0);
+  }, [activeWorkspaceId]);
 
   useEffect(() => {
-    if (!statsVisible) {
-      setStatsRenderStage(0);
-      return undefined;
-    }
+    if (!statsVisible) return undefined;
     let active = true;
     let frame = requestAnimationFrame(function revealNextSection() {
       if (!active) return;
@@ -355,7 +424,7 @@ const App = () => {
       statisticsSettings,
     ],
   );
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<KeyboardAwareScrollViewRef>(null);
   const scrollOffset = useRef(0);
   const categoryAnchors = useRef<Record<string, View | null>>({});
   const scrollToCategory = (categoryId: string) => {
@@ -379,6 +448,14 @@ const App = () => {
     day: 'numeric',
     year: 'numeric',
   });
+  const carryoverTimers = useMemo(
+    () => findCarryoverTimers(records, categories, selectedDateKey),
+    [records, categories, selectedDateKey],
+  );
+  const oldestRunningByCategory = useMemo(
+    () => getOldestRunningTimerByCategory(records),
+    [records],
+  );
 
   const applyUpdater = <T,>(updater: SetStateAction<T>, current: T): T =>
     typeof updater === 'function'
@@ -1090,6 +1167,13 @@ const App = () => {
           <Text style={styles.dailyEditButtonText}>Edit categories</Text>
         </Pressable>
       ) : null}
+      <CarryoverTimerSection
+        records={carryoverTimers}
+        categories={categories}
+        oldestRunningByCategory={oldestRunningByCategory}
+        viewedDateKey={selectedDateKey}
+        onChange={updateEntry}
+      />
       <Panel
         title="Daily entry"
         subtitle="Select a value for each category."
@@ -1141,7 +1225,9 @@ const App = () => {
                   }
                   style={styles.dailyGroupHeader}
                 >
-                  <Text style={styles.dailyGroupTitle}>{section.name}</Text>
+                  <Text style={styles.dailyGroupTitleLarge}>
+                    {section.name}
+                  </Text>
                   <Text style={styles.dailyGroupChevron}>
                     {expanded ? '\u2212' : '+'}
                   </Text>
@@ -1365,148 +1451,195 @@ const App = () => {
     );
 
   return (
-    <SafeAreaProvider>
-      <SystemScreen backgroundColor="#eaf0f7" style={styles.root}>
-        <View style={styles.header}>
-          <View style={[styles.headerTop, !desktop && styles.headerTopMobile]}>
-            {desktop ? (
-              <>
-                <View style={styles.headerSide}>{editCategoriesControl}</View>
-                {dateNavigationControl}
-                <View style={[styles.headerSide, styles.headerSideRight]}>
-                  {headerUtilityControls}
-                </View>
-              </>
-            ) : (
-              <View style={styles.mobileHeaderRow}>
-                {dateNavigationControl}
-                <View style={styles.mobileHeaderUtilities}>
-                  {headerUtilityControls}
-                </View>
+    <GestureHandlerRootView style={styles.gestureRoot}>
+      <KeyboardProvider>
+        <SafeAreaProvider>
+          <SystemScreen backgroundColor="#eaf0f7" style={styles.root}>
+            <View style={styles.header}>
+              <View
+                style={[styles.headerTop, !desktop && styles.headerTopMobile]}
+              >
+                {desktop ? (
+                  <>
+                    <View style={styles.headerSide}>
+                      {editCategoriesControl}
+                    </View>
+                    {dateNavigationControl}
+                    <View style={[styles.headerSide, styles.headerSideRight]}>
+                      {headerUtilityControls}
+                    </View>
+                  </>
+                ) : (
+                  <View style={styles.mobileHeaderRow}>
+                    {dateNavigationControl}
+                    <View style={styles.mobileHeaderUtilities}>
+                      {headerUtilityControls}
+                    </View>
+                  </View>
+                )}
               </View>
-            )}
-          </View>
-          <View style={[styles.modeRow, !desktop && styles.modeRowMobile]}>
-            <WorkspacePicker
-              options={pickableWorkspaces.map((workspace) => ({
-                id: workspace.id,
-                label: workspace.name,
-              }))}
-              selectedId={activeWorkspaceId}
-              onSelect={setActiveWorkspaceId}
-              onManage={() => setWorkspaceManagerOpen(true)}
-            />
-          </View>
-          {activeWorkspace?.notes ? (
-            <Text style={styles.workspaceNotes}>{activeWorkspace.notes}</Text>
-          ) : null}
-        </View>
-        {!desktop ? (
-          <View style={styles.pageTabs}>
-            <PageTab
-              label="Daily"
-              active={page === 'daily'}
-              onPress={() => setPage('daily')}
-            />
-            <PageTab
-              label="Stats"
-              active={page === 'stats'}
-              onPress={() => setPage('stats')}
-            />
-          </View>
-        ) : null}
-        <ScrollView
-          ref={scrollRef}
-          contentContainerStyle={styles.content}
-          onScroll={(event) => {
-            scrollOffset.current = event.nativeEvent.contentOffset.y;
-          }}
-          scrollEventThrottle={16}
-        >
-          {desktop ? (
-            <View style={styles.desktopGrid}>
-              <View style={styles.column}>{dailyPanel}</View>
-              <View style={styles.column}>{statisticsPanel}</View>
+              <View style={[styles.modeRow, !desktop && styles.modeRowMobile]}>
+                <WorkspacePicker
+                  options={pickableWorkspaces.map((workspace) => ({
+                    id: workspace.id,
+                    label: workspace.name,
+                  }))}
+                  selectedId={activeWorkspaceId}
+                  onSelect={setActiveWorkspaceId}
+                  onManage={() => setWorkspaceManagerOpen(true)}
+                />
+              </View>
+              {activeWorkspace?.notes ? (
+                <Text style={styles.workspaceNotes}>
+                  {activeWorkspace.notes}
+                </Text>
+              ) : null}
             </View>
-          ) : page === 'daily' ? (
-            dailyPanel
-          ) : (
-            statisticsPanel
-          )}
-        </ScrollView>
-        <CategoryEditor
-          visible={editorOpen}
-          categories={categories}
-          groups={groups}
-          selectedCategoryId={selectedCategoryId}
-          selectedGroupId={selectedGroupId}
-          onClose={() => setEditorOpen(false)}
-          onSelect={setSelectedCategoryId}
-          onAddGroup={addGroup}
-          onAddCategoryToGroup={addCategoryToGroup}
-          onRestoreDefaults={restoreDefaults}
-          onDeleteGroup={deleteGroup}
-          onDelete={deleteCategory}
-          onMoveCategory={moveCategory}
-          onUpdate={updateCategory}
-          onSelectGroup={(groupId) => {
-            setSelectedGroupId(groupId);
-            if (groupId) setSelectedCategoryId('');
-          }}
-          onUpdateGroup={updateGroup}
-        />
-        <StatisticsSettings
-          visible={statisticsSettingsOpen}
-          settings={statisticsSettings}
-          onChange={setStatisticsSettings}
-          onOpenCategorySettings={() => {
-            setStatisticsSettingsOpen(false);
-            setEditorOpen(true);
-          }}
-          onClose={() => setStatisticsSettingsOpen(false)}
-        />
-        <SettingsDrawer
-          visible={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
-          onExport={() => {
-            setSettingsOpen(false);
-            setExportOpen(true);
-          }}
-          onImport={() => {
-            setSettingsOpen(false);
-            setImportOpen(true);
-          }}
-        />
-        <ExportDataModal
-          visible={exportOpen}
-          workspaces={transferWorkspaces}
-          globals={transferGlobals}
-          onClose={() => setExportOpen(false)}
-        />
-        <ImportDataModal
-          visible={importOpen}
-          workspaces={transferWorkspaces}
-          globals={transferGlobals}
-          onApply={applyImportPlan}
-          onClose={() => setImportOpen(false)}
-        />
-        <WorkspaceManagerModal
-          visible={workspaceManagerOpen}
-          workspaces={workspaces}
-          onAdd={addWorkspace}
-          onUpdate={updateWorkspace}
-          onReorder={reorderWorkspaces}
-          onDelete={deleteWorkspace}
-          onClose={() => setWorkspaceManagerOpen(false)}
-        />
-        <DatePickerModal
-          visible={datePickerOpen}
-          date={selectedDate}
-          onSelect={setSelectedDate}
-          onClose={() => setDatePickerOpen(false)}
-        />
-      </SystemScreen>
-    </SafeAreaProvider>
+            {!desktop ? (
+              <View style={styles.pageTabs}>
+                <PageTab
+                  label="Daily"
+                  active={page === 'daily'}
+                  onPress={() => setPage('daily')}
+                />
+                <PageTab
+                  label="Stats"
+                  active={page === 'stats'}
+                  onPress={() => setPage('stats')}
+                />
+              </View>
+            ) : null}
+            {!desktop ? (
+              <GestureDetector gesture={swipeGesture}>
+                <View style={styles.pagerViewport}>
+                  <Animated.View
+                    style={[
+                      styles.pagerTrack,
+                      { width: width * 2 },
+                      pagerStyle,
+                    ]}
+                  >
+                    <View style={{ width }}>
+                      <KeyboardAwareScrollView
+                        ref={scrollRef}
+                        bottomOffset={24}
+                        contentContainerStyle={styles.content}
+                        keyboardDismissMode="on-drag"
+                        onScroll={(event) => {
+                          scrollOffset.current =
+                            event.nativeEvent.contentOffset.y;
+                        }}
+                        scrollEventThrottle={16}
+                      >
+                        {dailyPanel}
+                      </KeyboardAwareScrollView>
+                    </View>
+                    <View style={{ width }}>
+                      {statsMounted ? (
+                        <KeyboardAwareScrollView
+                          bottomOffset={24}
+                          contentContainerStyle={styles.content}
+                          keyboardDismissMode="on-drag"
+                        >
+                          {statisticsPanel}
+                        </KeyboardAwareScrollView>
+                      ) : null}
+                    </View>
+                  </Animated.View>
+                </View>
+              </GestureDetector>
+            ) : (
+              <KeyboardAwareScrollView
+                ref={scrollRef}
+                bottomOffset={24}
+                contentContainerStyle={styles.content}
+                keyboardDismissMode="on-drag"
+                onScroll={(event) => {
+                  scrollOffset.current = event.nativeEvent.contentOffset.y;
+                }}
+                scrollEventThrottle={16}
+              >
+                <View style={styles.desktopGrid}>
+                  <View style={styles.column}>{dailyPanel}</View>
+                  <View style={styles.column}>{statisticsPanel}</View>
+                </View>
+              </KeyboardAwareScrollView>
+            )}
+            <CategoryEditor
+              visible={editorOpen}
+              categories={categories}
+              groups={groups}
+              selectedCategoryId={selectedCategoryId}
+              selectedGroupId={selectedGroupId}
+              onClose={() => setEditorOpen(false)}
+              onSelect={setSelectedCategoryId}
+              onAddGroup={addGroup}
+              onAddCategoryToGroup={addCategoryToGroup}
+              onRestoreDefaults={restoreDefaults}
+              onDeleteGroup={deleteGroup}
+              onDelete={deleteCategory}
+              onMoveCategory={moveCategory}
+              onUpdate={updateCategory}
+              onSelectGroup={(groupId) => {
+                setSelectedGroupId(groupId);
+                if (groupId) setSelectedCategoryId('');
+              }}
+              onUpdateGroup={updateGroup}
+            />
+            <StatisticsSettings
+              visible={statisticsSettingsOpen}
+              settings={statisticsSettings}
+              onChange={setStatisticsSettings}
+              onOpenCategorySettings={() => {
+                setStatisticsSettingsOpen(false);
+                setEditorOpen(true);
+              }}
+              onClose={() => setStatisticsSettingsOpen(false)}
+            />
+            <SettingsDrawer
+              visible={settingsOpen}
+              onClose={() => setSettingsOpen(false)}
+              onExport={() => {
+                setSettingsOpen(false);
+                setExportOpen(true);
+              }}
+              onImport={() => {
+                setSettingsOpen(false);
+                setImportOpen(true);
+              }}
+            />
+            <ExportDataModal
+              visible={exportOpen}
+              workspaces={transferWorkspaces}
+              globals={transferGlobals}
+              onClose={() => setExportOpen(false)}
+            />
+            <ImportDataModal
+              visible={importOpen}
+              workspaces={transferWorkspaces}
+              globals={transferGlobals}
+              onApply={applyImportPlan}
+              onClose={() => setImportOpen(false)}
+            />
+            <WorkspaceManagerModal
+              visible={workspaceManagerOpen}
+              workspaces={workspaces}
+              onAdd={addWorkspace}
+              onUpdate={updateWorkspace}
+              onReorder={reorderWorkspaces}
+              onDelete={deleteWorkspace}
+              onClose={() => setWorkspaceManagerOpen(false)}
+            />
+            <DatePickerModal
+              visible={datePickerOpen}
+              date={selectedDate}
+              onSelect={setSelectedDate}
+              onClose={() => setDatePickerOpen(false)}
+            />
+          </SystemScreen>
+        </SafeAreaProvider>
+      </KeyboardProvider>
+    </GestureHandlerRootView>
   );
 };
 
@@ -1530,6 +1663,9 @@ const PageTab = ({
 );
 
 const styles = StyleSheet.create({
+  gestureRoot: { flex: 1 },
+  pagerViewport: { flex: 1, overflow: 'hidden' },
+  pagerTrack: { flex: 1, flexDirection: 'row' },
   root: { flex: 1, backgroundColor: colors.canvas },
   loading: {
     flex: 1,
@@ -1674,6 +1810,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.6,
     textTransform: 'uppercase',
+  },
+  // Slightly larger/bolder than category titles (16/700) so group names stand out above them.
+  dailyGroupTitleLarge: {
+    color: colors.text,
+    fontSize: 17,
+    fontWeight: '800',
   },
   dailyGroupChevron: { color: colors.muted, fontSize: 16, fontWeight: '700' },
   statistics: { flex: 1 },

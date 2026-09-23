@@ -354,102 +354,6 @@ describe('correlation engine', () => {
     expect(input.records.some((record) => record.value === 5000)).toBe(true);
   });
 
-  it('allocates date-spanning timer hours to each local day', () => {
-    const duration = createDefaultCategory('duration', 0, 'Focus');
-    const start = new Date(2026, 2, 1, 22, 0, 0);
-    const stop = new Date(2026, 2, 2, 2, 0, 0);
-    const input = createVirtualCorrelationInput(
-      [duration],
-      {
-        timer: {
-          key: '2026-03-01:0:timer',
-          categoryId: duration.id,
-          dateKey: '2026-03-01',
-          ordinal: 0,
-          localTime: '22:00:00',
-          value: 0,
-          startTime: start.toISOString(),
-          stopTime: stop.toISOString(),
-        },
-      },
-      [0],
-      false,
-      [],
-      stop.getTime(),
-    );
-    const seriesId = `${duration.id}:durationHoursByDay:sum`;
-
-    expect(
-      input.records.filter((record) => record.categoryId === seriesId),
-    ).toEqual([
-      { categoryId: seriesId, dateKey: '2026-03-01', value: 2 },
-      { categoryId: seriesId, dateKey: '2026-03-02', value: 2 },
-    ]);
-  });
-
-  it('omits daily timer hours when the stop is on the start date', () => {
-    const duration = createDefaultCategory('duration', 0, 'Focus');
-    const start = new Date(2026, 2, 1, 20, 0, 0);
-    const stop = new Date(2026, 2, 1, 23, 0, 0);
-    const input = createVirtualCorrelationInput(
-      [duration],
-      {
-        timer: {
-          key: '2026-03-01:0:timer',
-          categoryId: duration.id,
-          dateKey: '2026-03-01',
-          ordinal: 0,
-          localTime: '20:00:00',
-          value: 0,
-          startTime: start.toISOString(),
-          stopTime: stop.toISOString(),
-        },
-      },
-      [0],
-      false,
-      [],
-      stop.getTime(),
-    );
-
-    expect(
-      input.records.filter((record) =>
-        record.categoryId.includes('durationHoursByDay'),
-      ),
-    ).toEqual([]);
-  });
-
-  it('projects an active date-spanning timer through the supplied time', () => {
-    const duration = createDefaultCategory('duration', 0, 'Focus');
-    const start = new Date(2026, 2, 1, 23, 0, 0);
-    const asOf = new Date(2026, 2, 2, 2, 0, 0);
-    const input = createVirtualCorrelationInput(
-      [duration],
-      {
-        timer: {
-          key: `2026-03-01:0:${duration.id}`,
-          categoryId: duration.id,
-          dateKey: '2026-03-01',
-          ordinal: 0,
-          localTime: '23:00:00',
-          value: 0,
-          startTime: start.toISOString(),
-        },
-      },
-      [0],
-      false,
-      [],
-      asOf.getTime(),
-    );
-    const seriesId = `${duration.id}:durationHoursByDay:sum`;
-
-    expect(
-      input.records.filter((record) => record.categoryId === seriesId),
-    ).toEqual([
-      { categoryId: seriesId, dateKey: '2026-03-01', value: 1 },
-      { categoryId: seriesId, dateKey: '2026-03-02', value: 2 },
-    ]);
-  });
-
   it('keeps documentation bundled and searchable by concept text', () => {
     expect(documentationSections.length).toBeGreaterThanOrEqual(9);
     expect(
@@ -745,11 +649,6 @@ describe('correlation engine', () => {
     ).toBe(false);
     expect(createCorrelationInputHash([category], records, [0])).not.toBe(
       createCorrelationInputHash([category], records, [0, 1]),
-    );
-    expect(
-      createCorrelationInputHash([category], records, [0], true, [], 1000),
-    ).not.toBe(
-      createCorrelationInputHash([category], records, [0], true, [], 2000),
     );
   });
 

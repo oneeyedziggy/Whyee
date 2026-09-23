@@ -19,7 +19,6 @@ export type VirtualSeriesField =
   | 'startTime'
   | 'stopTime'
   | 'durationMs'
-  | 'durationHoursByDay'
   | 'noteText'
   | 'optionSelected';
 
@@ -54,12 +53,19 @@ export interface NotificationTime {
   id: string;
   hour: number;
   minute: number;
+  weekdays: number[];
 }
 
 export interface NotificationSchedule {
   enabled: boolean;
-  weekdays: number[];
   times: NotificationTime[];
+}
+
+/** Legacy on-disk shape (pre per-time weekdays) kept only for migration in normalizeNotificationSchedule. */
+export interface LegacyNotificationSchedule {
+  enabled: boolean;
+  weekdays: number[];
+  times: Array<{ id: string; hour: number; minute: number }>;
 }
 
 export interface BaseCategory {
@@ -110,6 +116,8 @@ export interface DurationCategory extends BaseCategory {
     resetEnabled: boolean;
     cumulative: boolean;
     animate: boolean;
+    // true (default) shows 24h clock times; false shows 12h times with AM/PM.
+    use24HourClock: boolean;
   };
 }
 

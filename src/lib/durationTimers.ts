@@ -22,6 +22,40 @@ export const applyDurationPrecision = (
 ): number =>
   showMilliseconds ? milliseconds : Math.round(milliseconds / 1000) * 1000;
 
+// If applying a time-of-day edit to `base`'s date would violate the given bounds (typically
+// because it made a stop time earlier than its start), try the same time-of-day on the next
+// calendar day instead of rejecting outright — handles edits that cross midnight.
+export const resolveRolloverDate = (
+  base: Date,
+  timeOfDay: {
+    hours: number;
+    minutes: number;
+    seconds: number;
+    milliseconds: number;
+  },
+  bounds: { minTimestamp?: number; maxTimestamp?: number },
+): Date | null => {
+  const withinBounds = (date: Date): boolean => {
+    const time = date.getTime();
+    if (bounds.minTimestamp !== undefined && time < bounds.minTimestamp)
+      return false;
+    if (bounds.maxTimestamp !== undefined && time > bounds.maxTimestamp)
+      return false;
+    return true;
+  };
+  const candidate = new Date(base);
+  candidate.setHours(
+    timeOfDay.hours,
+    timeOfDay.minutes,
+    timeOfDay.seconds,
+    timeOfDay.milliseconds,
+  );
+  if (withinBounds(candidate)) return candidate;
+  const nextDay = new Date(candidate);
+  nextDay.setDate(nextDay.getDate() + 1);
+  return withinBounds(nextDay) ? nextDay : null;
+};
+
 export const getCompletedDurationIntervals = (
   record: CategorySelectionRecord,
 ): DurationInterval[] => {
@@ -122,7 +156,13 @@ export const editDurationStopTime = (
             }
           : run,
       )
-    : [{ startTime: record.startTime!, stopTime, durationMs: stopMs - startMs }];
+    : [
+        {
+          startTime: record.startTime!,
+          stopTime,
+          durationMs: stopMs - startMs,
+        },
+      ];
   if (durationRuns.some((run) => run.durationMs < 0)) return null;
   return withDurationTotal(
     { ...record, stopTime },
@@ -161,10 +201,10 @@ export const intervalOverlapsDate = (
   const stop = parsedTime(interval.stopTime);
   return Boolean(
     bounds &&
-      start !== null &&
-      stop !== null &&
-      start < bounds.end &&
-      stop > bounds.start,
+    start !== null &&
+    stop !== null &&
+    start < bounds.end &&
+    stop > bounds.start,
   );
 };
 
@@ -183,7 +223,10 @@ export const findCarryoverTimers = (
     .filter((record) => {
       if (!durationCategoryIds.has(record.categoryId)) return false;
       const startMs = parsedTime(record.startTime);
-      if (startMs === null || getLocalDateKey(new Date(startMs)) >= selectedDateKey)
+      if (
+        startMs === null ||
+        getLocalDateKey(new Date(startMs)) >= selectedDateKey
+      )
         return false;
       return getDurationIntervals(record, asOf).some((interval) =>
         intervalOverlapsDate(interval, selectedDateKey),
@@ -191,7 +234,8 @@ export const findCarryoverTimers = (
     })
     .sort(
       (left, right) =>
-        (parsedTime(left.startTime) ?? 0) - (parsedTime(right.startTime) ?? 0) ||
+        (parsedTime(left.startTime) ?? 0) -
+          (parsedTime(right.startTime) ?? 0) ||
         left.categoryId.localeCompare(right.categoryId) ||
         left.ordinal - right.ordinal,
     );

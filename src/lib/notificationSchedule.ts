@@ -1,4 +1,8 @@
-import type { NotificationSchedule, NotificationTime } from '../types/category';
+import type {
+  LegacyNotificationSchedule,
+  NotificationSchedule,
+  NotificationTime,
+} from '../types/category';
 
 export interface NotificationRequestSpec {
   timeId: string;
@@ -9,6 +13,11 @@ export interface NotificationRequestSpec {
 
 const validWeekday = (weekday: number): boolean =>
   Number.isInteger(weekday) && weekday >= 1 && weekday <= 7;
+
+const normalizeWeekdays = (weekdays: number[] | undefined): number[] =>
+  [...new Set((weekdays ?? []).filter(validWeekday))].sort(
+    (left, right) => left - right,
+  );
 
 const validTime = (time: NotificationTime): boolean =>
   typeof time.id === 'string' &&
@@ -25,46 +34,50 @@ const timeSort = (left: NotificationTime, right: NotificationTime): number =>
   left.minute - right.minute ||
   left.id.localeCompare(right.id);
 
+const timeIdentity = (time: NotificationTime): string =>
+  `${time.hour}:${time.minute}:${time.weekdays.join(',')}`;
+
+// Accepts the legacy on-disk shape (single schedule-level `weekdays`, no per-time weekdays) and
+// migrates it by copying that array onto every time entry.
 export const normalizeNotificationSchedule = (
-  schedule: NotificationSchedule | undefined,
+  schedule: NotificationSchedule | LegacyNotificationSchedule | undefined,
 ): NotificationSchedule | undefined => {
   if (!schedule) return undefined;
-  const weekdays = [...new Set(schedule.weekdays.filter(validWeekday))].sort(
-    (left, right) => left - right,
-  );
+  const legacyWeekdays =
+    'weekdays' in schedule ? normalizeWeekdays(schedule.weekdays) : undefined;
   const times = [...schedule.times]
+    .map((time) => ({
+      ...time,
+      weekdays: normalizeWeekdays(
+        'weekdays' in time ? time.weekdays : legacyWeekdays,
+      ),
+    }))
     .filter(validTime)
     .sort(timeSort)
     .filter(
       (time, index, all) =>
-        index === 0 ||
-        time.hour !== all[index - 1].hour ||
-        time.minute !== all[index - 1].minute,
+        index === 0 || timeIdentity(time) !== timeIdentity(all[index - 1]),
     );
-  return { enabled: schedule.enabled === true, weekdays, times };
+  return { enabled: schedule.enabled === true, times };
 };
 
 export const expandNotificationSchedule = (
-  schedule: NotificationSchedule,
+  schedule: NotificationSchedule | LegacyNotificationSchedule,
 ): NotificationRequestSpec[] => {
   const normalized = normalizeNotificationSchedule(schedule);
   if (!normalized?.enabled) return [];
-  if (!normalized.weekdays.length || !normalized.times.length) return [];
-  if (normalized.weekdays.length === 7) {
-    return normalized.times.map((time) => ({
-      timeId: time.id,
-      hour: time.hour,
-      minute: time.minute,
-    }));
-  }
-  return normalized.weekdays.flatMap((weekday) =>
-    normalized.times.map((time) => ({
+  return normalized.times.flatMap((time) => {
+    if (!time.weekdays.length) return [];
+    if (time.weekdays.length === 7) {
+      return [{ timeId: time.id, hour: time.hour, minute: time.minute }];
+    }
+    return time.weekdays.map((weekday) => ({
       timeId: time.id,
       hour: time.hour,
       minute: time.minute,
       weekday,
-    })),
-  );
+    }));
+  });
 };
 
 export const notificationScheduleHasMultipleTimes = (

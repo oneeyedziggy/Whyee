@@ -6,10 +6,6 @@ import type {
 } from '../types/category';
 import type { CorrelationRequest } from '../types/correlation';
 import type { CategoryGroup } from '../types/category';
-import {
-  getDurationIntervals,
-  splitIntervalHoursByLocalDate,
-} from './durationTimers';
 import { scoreSentiment } from './sentiment';
 
 const numericValue = (
@@ -80,8 +76,6 @@ const fieldDescriptions: Record<VirtualSeriesDefinition['field'], string> = {
   startTime: 'the start time, as milliseconds since local midnight',
   stopTime: 'the stop time, as milliseconds since local midnight',
   durationMs: 'the elapsed duration in milliseconds',
-  durationHoursByDay:
-    'the elapsed timer hours allocated to each local calendar day',
   noteText: 'the note text',
   optionSelected: 'whether this choice was picked',
 };
@@ -121,14 +115,10 @@ export const createVirtualCorrelationInput = (
   offsets: number[],
   includeCalendar = true,
   groups: CategoryGroup[] = [],
-  asOf = Date.now(),
 ): CorrelationRequest => {
   const inputCategories: CorrelationRequest['categories'] = [];
   const inputRecords: CorrelationRequest['records'] = [];
   const allRecords = Object.values(records);
-  const projectedDateKeys = new Set(
-    allRecords.map((record) => record.dateKey),
-  );
   const recordsByCategoryId = new Map<string, CategorySelectionRecord[]>();
   for (const record of allRecords) {
     const categoryRecords = recordsByCategoryId.get(record.categoryId) ?? [];
@@ -246,19 +236,6 @@ export const createVirtualCorrelationInput = (
         });
         const valuesByDate = new Map<string, number[]>();
         for (const record of instanceRecords) {
-          if (definition.field === 'durationHoursByDay') {
-            for (const interval of getDurationIntervals(record, asOf)) {
-              for (const [dateKey, hours] of splitIntervalHoursByLocalDate(
-                interval,
-              )) {
-                const dateValues = valuesByDate.get(dateKey) ?? [];
-                dateValues.push(hours);
-                valuesByDate.set(dateKey, dateValues);
-                projectedDateKeys.add(dateKey);
-              }
-            }
-            continue;
-          }
           const value = numericValue(
             record,
             definition.field,
@@ -305,7 +282,8 @@ export const createVirtualCorrelationInput = (
         name: definition.name,
         global: true,
       });
-      for (const dateKey of projectedDateKeys) {
+      const dates = new Set(allRecords.map((record) => record.dateKey));
+      for (const dateKey of dates) {
         inputRecords.push({
           categoryId: definition.id,
           dateKey,

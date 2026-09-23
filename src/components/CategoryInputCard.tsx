@@ -13,18 +13,23 @@ import type {
   CategorySelectionRecord,
 } from '../types/category';
 import {
+  calendarDayDiff,
+  formatHumanDate,
   getLocalDateKey,
   getLocalTimeStamp,
   makeRecordKey,
+  nowOnDateKey,
 } from '../lib/dates';
 import { confirmAction } from '../lib/confirm';
 import {
   applyDurationPrecision,
   editDurationStopTime,
+  resolveRolloverDate,
   stopDurationRecord,
 } from '../lib/durationTimers';
 import { scoreSentiment } from '../lib/sentiment';
 import { colors } from '../theme/tokens';
+import { SystemTimeField } from './SystemTimeField';
 
 const SENTIMENT_DEBOUNCE_MS = 900;
 
@@ -404,7 +409,7 @@ const NumberInput = ({
   </View>
 );
 
-const DurationInput = ({
+export const DurationInput = ({
   category,
   entry,
   entries,
@@ -414,6 +419,7 @@ const DurationInput = ({
   onChange,
   onAddEntry,
   blocked,
+  carryoverMode = false,
 }: {
   category: Extract<CategoryDefinition, { kind: 'duration' }>;
   entry: CategorySelectionRecord | null;
@@ -424,6 +430,7 @@ const DurationInput = ({
   onChange: (entry: CategorySelectionRecord) => void;
   onAddEntry: (initial?: Partial<CategorySelectionRecord>) => void;
   blocked: boolean;
+  carryoverMode?: boolean;
 }) => {
   const [now, setNow] = useState(Date.now());
   const [notice, setNotice] = useState('');
@@ -446,10 +453,14 @@ const DurationInput = ({
       durationMs: applyDurationPrecision(exact, showMilliseconds),
       value: applyDurationPrecision(exact, showMilliseconds),
     });
-  // Restarting keeps whatever has already been banked; only Reset clears it.
+  // Restarting keeps whatever has already been banked; only Reset clears it. Only the very first
+  // start (nothing banked or run yet) is pinned to the viewed date — later restarts resume from
+  // the real current moment, otherwise each stop/start cycle would add another day's worth of delta.
   const start = () => {
-    const startedAt = new Date();
-    setNow(startedAt.getTime());
+    const isFreshStart =
+      !entry?.startTime && !entry?.stopTime && !entry?.durationRuns?.length;
+    const startedAt = isFreshStart ? nowOnDateKey(dateKey) : new Date();
+    setNow(Date.now());
     setNotice('');
     patchEntry({
       localTime: entry?.localTime ?? getLocalTimeStamp(startedAt),
@@ -477,7 +488,7 @@ const DurationInput = ({
   const split = () => {
     if (!entry?.startTime) return;
     stop();
-    onAddEntry({ startTime: new Date().toISOString() });
+    onAddEntry({ startTime: nowOnDateKey(dateKey).toISOString() });
   };
   const bankedMs = (entry?.durationRuns ?? []).reduce(
     (sum, run) => sum + run.durationMs,
@@ -553,28 +564,31 @@ const DurationInput = ({
           </Text>
         ) : null}
       </View>
-      <View style={styles.durationButtons}>
-        <Pressable
-          disabled={running || blocked}
-          onPress={start}
-          style={[
-            styles.actionButton,
-            (running || blocked) && styles.disabledButton,
-          ]}
-        >
-          <Text style={styles.actionText}>Start</Text>
-        </Pressable>
+      <View style={[styles.durationButtons, carryoverMode && styles.durationButtonsCarryover]}>
+        {!carryoverMode ? (
+          <Pressable
+            disabled={running || blocked}
+            onPress={start}
+            style={[
+              styles.actionButton,
+              (running || blocked) && styles.disabledButton,
+            ]}
+          >
+            <Text style={styles.actionText}>Start</Text>
+          </Pressable>
+        ) : null}
         <Pressable
           disabled={!running || blocked}
           onPress={stop}
           style={[
             styles.actionButton,
+            carryoverMode && styles.actionButtonCarryover,
             (!running || blocked) && styles.disabledButton,
           ]}
         >
           <Text style={styles.actionText}>Stop</Text>
         </Pressable>
-        {category.duration.splitEnabled && isLast ? (
+        {!carryoverMode && category.duration.splitEnabled && isLast ? (
           <Pressable
             disabled={!running || blocked}
             onPress={split}
@@ -586,7 +600,7 @@ const DurationInput = ({
             <Text style={styles.actionText}>Split</Text>
           </Pressable>
         ) : null}
-        {category.duration.resetEnabled && isLast ? (
+        {!carryoverMode && category.duration.resetEnabled && isLast ? (
           <Pressable
             disabled={blocked}
             onPress={reset}
@@ -603,6 +617,7 @@ const DurationInput = ({
             label="Start time"
             timestamp={entry.startTime}
             showMilliseconds={showMilliseconds}
+            is24Hour={category.duration.use24HourClock !== false}
             maxTimestamp={entry.stopTime}
             onChange={(value) => editTimestamp('startTime', value)}
             onReject={setNotice}
@@ -613,11 +628,14 @@ const DurationInput = ({
             label="Stop time"
             timestamp={entry.stopTime}
             showMilliseconds={showMilliseconds}
+            is24Hour={category.duration.use24HourClock !== false}
             minTimestamp={entry.startTime}
             onChange={(value) => editTimestamp('stopTime', value)}
             onReject={setNotice}
             rejectMessage="Stop time cannot be earlier than the start time."
-            disabled={blocked}
+            disabled={blocked || running}
+            showDateButton
+            hideDayOffset={carryoverMode}
           />
         </View>
       ) : null}
@@ -718,41 +736,39 @@ const TimeEditor = ({
   label,
   timestamp,
   showMilliseconds,
+  is24Hour = true,
   minTimestamp,
   maxTimestamp,
   rejectMessage,
   onChange,
   onReject,
   disabled = false,
+  showDateButton = false,
+  hideDayOffset = false,
 }: {
   label: string;
   timestamp?: string;
   showMilliseconds: boolean;
+  is24Hour?: boolean;
   minTimestamp?: string;
   maxTimestamp?: string;
   rejectMessage: string;
   onChange: (value: Date) => void;
   onReject: (message: string) => void;
   disabled?: boolean;
+  showDateButton?: boolean;
+  hideDayOffset?: boolean;
 }) => {
   const initialDate = timestamp ? new Date(timestamp) : new Date();
-  const [hours, setHours] = useState(initialDate.getHours());
-  const [minutes, setMinutes] = useState(initialDate.getMinutes());
-  const [seconds, setSeconds] = useState(initialDate.getSeconds());
-  const [milliseconds, setMilliseconds] = useState(
-    initialDate.getMilliseconds(),
-  );
-  const repeatTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const repeatStartedAt = useRef(0);
-  useEffect(
-    () => () => {
-      if (repeatTimer.current) clearInterval(repeatTimer.current);
-      repeatTimer.current = null;
-    },
-    [],
-  );
   const [text, setText] = useState(
-    formatTime(hours, minutes, seconds, milliseconds, showMilliseconds),
+    formatTime(
+      initialDate.getHours(),
+      initialDate.getMinutes(),
+      initialDate.getSeconds(),
+      initialDate.getMilliseconds(),
+      showMilliseconds,
+      is24Hour,
+    ),
   );
 
   useEffect(() => {
@@ -763,13 +779,10 @@ const TimeEditor = ({
       date.getSeconds(),
       date.getMilliseconds(),
       showMilliseconds,
+      is24Hour,
     );
-    setHours(date.getHours());
-    setMinutes(date.getMinutes());
-    setSeconds(date.getSeconds());
-    setMilliseconds(date.getMilliseconds());
     setText(nextText);
-  }, [showMilliseconds, timestamp]);
+  }, [showMilliseconds, is24Hour, timestamp]);
 
   const withinBounds = (candidate: Date): boolean => {
     const time = candidate.getTime();
@@ -783,159 +796,125 @@ const TimeEditor = ({
     nextSeconds: number,
     nextMilliseconds: number,
   ) => {
-    const date = timestamp ? new Date(timestamp) : new Date();
-    date.setHours(nextHours, nextMinutes, nextSeconds, nextMilliseconds);
-    if (!withinBounds(date)) {
+    const base = timestamp ? new Date(timestamp) : new Date();
+    const date = resolveRolloverDate(
+      base,
+      {
+        hours: nextHours,
+        minutes: nextMinutes,
+        seconds: nextSeconds,
+        milliseconds: nextMilliseconds,
+      },
+      {
+        minTimestamp: minTimestamp ? Date.parse(minTimestamp) : undefined,
+        maxTimestamp: maxTimestamp ? Date.parse(maxTimestamp) : undefined,
+      },
+    );
+    if (!date) {
       onReject(rejectMessage);
       return;
     }
     onReject('');
     setText(
       formatTime(
-        nextHours,
-        nextMinutes,
-        nextSeconds,
-        nextMilliseconds,
+        date.getHours(),
+        date.getMinutes(),
+        date.getSeconds(),
+        date.getMilliseconds(),
         showMilliseconds,
+        is24Hour,
       ),
     );
     onChange(date);
   };
-  const candidateFor = (
-    field: 'hours' | 'minutes' | 'seconds' | 'milliseconds',
-    delta: number,
-  ): Date => {
-    const date = timestamp ? new Date(timestamp) : new Date();
-    date.setHours(hours, minutes, seconds, milliseconds);
-    const amount =
-      field === 'hours'
-        ? delta * 3600000
-        : field === 'minutes'
-          ? delta * 60000
-          : field === 'seconds'
-            ? delta * 1000
-            : delta;
-    date.setTime(date.getTime() + amount);
-    return date;
-  };
-  const adjust = (
-    field: 'hours' | 'minutes' | 'seconds' | 'milliseconds',
-    delta: number,
-  ) => {
-    const date = candidateFor(field, delta);
-    commit(
-      date.getHours(),
-      date.getMinutes(),
-      date.getSeconds(),
-      date.getMilliseconds(),
-    );
-  };
-  const stopRepeating = () => {
-    if (repeatTimer.current) clearInterval(repeatTimer.current);
-    repeatTimer.current = null;
-  };
-  const startRepeating = (
-    field: 'hours' | 'minutes' | 'seconds' | 'milliseconds',
-    delta: number,
-  ) => {
-    stopRepeating();
-    repeatStartedAt.current = Date.now();
-    repeatTimer.current = setInterval(() => {
-      const elapsed = Date.now() - repeatStartedAt.current;
-      const multiplier =
-        elapsed > 4000 ? 10 : elapsed > 2000 ? 5 : elapsed > 800 ? 2 : 1;
-      adjust(field, delta * multiplier);
-    }, 180);
-  };
   const parseText = (value: string) => {
     setText(value);
     const match = value.match(
-      /^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.(\d{1,3}))?$/,
+      /^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.(\d{1,3}))?\s*(AM|PM)?$/i,
     );
     if (!match) return;
-    const nextHours = Math.min(23, Number(match[1]));
+    const meridiem = match[5]?.toUpperCase();
+    let nextHours = Math.min(is24Hour ? 23 : 12, Number(match[1]));
+    if (meridiem) {
+      nextHours = nextHours % 12;
+      if (meridiem === 'PM') nextHours += 12;
+    }
     const nextMinutes = Math.min(59, Number(match[2]));
     const nextSeconds = Math.min(59, Number(match[3] ?? 0));
     const nextMilliseconds = Number((match[4] ?? '0').padEnd(3, '0'));
-    setHours(nextHours);
-    setMinutes(nextMinutes);
-    setSeconds(nextSeconds);
-    setMilliseconds(nextMilliseconds);
     commit(nextHours, nextMinutes, nextSeconds, nextMilliseconds);
   };
-  const fields: Array<'hours' | 'minutes' | 'seconds' | 'milliseconds'> = [
-    'hours',
-    'minutes',
-    'seconds',
-    ...(showMilliseconds ? (['milliseconds'] as const) : []),
-  ];
+  const pickerValue = timestamp ? new Date(timestamp) : new Date();
+  const dayOffset =
+    showDateButton && !hideDayOffset && minTimestamp && timestamp
+      ? calendarDayDiff(new Date(minTimestamp), pickerValue)
+      : 0;
   return (
     <View style={styles.timeEditor}>
       <Text style={styles.help}>{label}</Text>
-      <TextInput
-        editable={!disabled}
-        value={text}
-        onChangeText={parseText}
-        placeholder={showMilliseconds ? 'HH:MM:SS.mmm' : 'HH:MM:SS'}
-        placeholderTextColor={colors.placeholder}
-        style={styles.timeInput}
-      />
-      <View style={styles.stepperRow}>
-        {fields.map((field) => {
-          const canIncrease = withinBounds(candidateFor(field, 1));
-          const canDecrease = withinBounds(candidateFor(field, -1));
-          return (
-            <View key={field} style={styles.stepper}>
-              <Pressable
-                accessibilityLabel={`Increase ${label} ${stepLabels[field]}`}
-                disabled={disabled || !canIncrease}
-                onPress={() => adjust(field, 1)}
-                onPressIn={() => canIncrease && startRepeating(field, 1)}
-                onPressOut={stopRepeating}
-                style={[
-                  styles.stepButton,
-                  (disabled || !canIncrease) && styles.stepBlocked,
-                ]}
-              >
-                <Text style={styles.stepText}>+</Text>
-              </Pressable>
-              <Text style={styles.stepValue}>
-                {field === 'hours'
-                  ? hours
-                  : field === 'minutes'
-                    ? minutes
-                    : field === 'seconds'
-                      ? seconds
-                      : milliseconds}
-              </Text>
-              <Pressable
-                accessibilityLabel={`Decrease ${label} ${stepLabels[field]}`}
-                disabled={disabled || !canDecrease}
-                onPress={() => adjust(field, -1)}
-                onPressIn={() => canDecrease && startRepeating(field, -1)}
-                onPressOut={stopRepeating}
-                style={[
-                  styles.stepButton,
-                  (disabled || !canDecrease) && styles.stepBlocked,
-                ]}
-              >
-                <Text style={styles.stepText}>-</Text>
-              </Pressable>
-              <Text style={styles.stepLabel}>{stepLabels[field]}</Text>
-            </View>
-          );
-        })}
+      <View style={styles.timeInputRow}>
+        <TextInput
+          editable={!disabled}
+          value={text}
+          onChangeText={parseText}
+          placeholder={
+            showMilliseconds
+              ? 'HH:MM:SS.mmm'
+              : is24Hour
+                ? 'HH:MM:SS'
+                : 'HH:MM:SS AM/PM'
+          }
+          placeholderTextColor={colors.placeholder}
+          style={[styles.timeInput, styles.timeInputFlex]}
+        />
+        <SystemTimeField
+          accessibilityLabel={`Open system time picker for ${label}`}
+          disabled={disabled}
+          is24Hour={is24Hour}
+          mode="time"
+          onChange={(value) =>
+            commit(
+              value.getHours(),
+              value.getMinutes(),
+              value.getSeconds(),
+              value.getMilliseconds(),
+            )
+          }
+          value={pickerValue}
+        />
+        {showDateButton ? (
+          <SystemTimeField
+            accessibilityLabel={`Edit date for ${label}`}
+            compact
+            disabled={disabled}
+            mode="date"
+            onChange={(dateOnly) => {
+              const merged = new Date(pickerValue);
+              merged.setFullYear(
+                dateOnly.getFullYear(),
+                dateOnly.getMonth(),
+                dateOnly.getDate(),
+              );
+              if (!withinBounds(merged)) {
+                onReject(rejectMessage);
+                return;
+              }
+              onReject('');
+              onChange(merged);
+            }}
+            value={pickerValue}
+          />
+        ) : null}
       </View>
+      {dayOffset > 0 ? (
+        <Text style={styles.dayOffset}>
+          +{dayOffset} day{dayOffset === 1 ? '' : 's'} (
+          {formatHumanDate(pickerValue)})
+        </Text>
+      ) : null}
     </View>
   );
 };
-
-const stepLabels = {
-  hours: 'HOUR',
-  minutes: 'MIN',
-  seconds: 'SEC',
-  milliseconds: 'MS',
-} as const;
 
 const formatTime = (
   hours: number,
@@ -943,13 +922,16 @@ const formatTime = (
   seconds: number,
   milliseconds: number,
   showMilliseconds: boolean,
+  is24Hour = true,
 ): string => {
-  const base = [hours, minutes, seconds]
+  const displayHours = is24Hour ? hours : hours % 12 === 0 ? 12 : hours % 12;
+  const base = [displayHours, minutes, seconds]
     .map((value) => value.toString().padStart(2, '0'))
     .join(':');
-  return showMilliseconds
+  const withMs = showMilliseconds
     ? `${base}.${milliseconds.toString().padStart(3, '0')}`
     : base;
+  return is24Hour ? withMs : `${withMs} ${hours < 12 ? 'AM' : 'PM'}`;
 };
 
 const formatDuration = (
@@ -1039,6 +1021,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 10,
   },
+  durationButtonsCarryover: { marginTop: 0 },
   actionButton: {
     backgroundColor: colors.primary,
     borderRadius: 6,
@@ -1047,6 +1030,7 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     alignItems: 'center',
   },
+  actionButtonCarryover: { flex: 1 },
   disabledButton: { backgroundColor: colors.border },
   actionText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   counterValue: {
@@ -1114,32 +1098,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   timeEditor: { flex: 1, marginTop: 8 },
-  stepperRow: { flexDirection: 'row', gap: 4, marginTop: 8 },
-  stepper: { alignItems: 'center', flex: 1, minWidth: 0 },
-  stepBlocked: { backgroundColor: colors.border, borderColor: colors.border },
-  stepButton: {
-    alignItems: 'center',
-    backgroundColor: colors.primarySoft,
-    borderColor: colors.primary,
-    borderRadius: 5,
-    borderWidth: 1,
-    height: 26,
-    justifyContent: 'center',
-    width: '100%',
-  },
-  stepText: {
+  timeInputRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  timeInputFlex: { flex: 1 },
+  dayOffset: {
     color: colors.primary,
-    fontSize: 18,
+    fontSize: 11,
     fontWeight: '700',
-    lineHeight: 20,
+    marginTop: 4,
   },
-  stepValue: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: '700',
-    paddingVertical: 4,
-  },
-  stepLabel: { color: colors.muted, fontSize: 9, textTransform: 'uppercase' },
   noteField: { marginTop: 2 },
   sentimentRow: {
     alignItems: 'center',

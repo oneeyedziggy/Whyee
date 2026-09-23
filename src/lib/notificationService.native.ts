@@ -1,3 +1,4 @@
+import { LogBox } from 'react-native';
 import type * as ExpoNotifications from 'expo-notifications';
 import type { CategoryDefinition } from '../types/category';
 import type { NotificationRequestSpec } from './notificationSchedule';
@@ -6,10 +7,26 @@ import type {
   NotificationService,
 } from './notificationService';
 
+// Already handled gracefully below (falls back to a no-op); suppress the LogBox popup so it
+// doesn't look like a crash while developing in Expo Go (SDK 53+ removed this there).
+LogBox.ignoreLogs(['expo-notifications: Android Push notifications']);
+
 const channelId = 'category-reminders';
 const categoryPrefix = 'category_entry_';
 let notificationsModule: typeof ExpoNotifications | null | undefined;
 let handlerRegistered = false;
+let warned = false;
+// expo-notifications throws when actually used under Expo Go on SDK 53+ (Android push support was
+// removed there; a development build is required). Log once and degrade to a no-op instead of
+// crashing the caller.
+const warnUnsupported = (error: unknown) => {
+  if (warned) return;
+  warned = true;
+  console.warn(
+    'Notifications are unavailable in this build (likely Expo Go on SDK 53+); use a development build to test scheduling.',
+    error,
+  );
+};
 
 const getNotifications = (): typeof ExpoNotifications | null => {
   if (notificationsModule !== undefined) return notificationsModule;
@@ -27,8 +44,9 @@ const getNotifications = (): typeof ExpoNotifications | null => {
       });
       handlerRegistered = true;
     }
-  } catch {
+  } catch (error) {
     notificationsModule = null;
+    warnUnsupported(error);
   }
   return notificationsModule ?? null;
 };
@@ -76,34 +94,43 @@ const registerCategory = async (
   const notifications = getNotifications();
   if (!notifications) return nativeCategoryId(category.id);
   const identifier = nativeCategoryId(category.id);
-  await notifications.setNotificationCategoryAsync(
-    identifier,
-    getActions(category),
-  );
+  try {
+    await notifications.setNotificationCategoryAsync(
+      identifier,
+      getActions(category),
+    );
+  } catch (error) {
+    warnUnsupported(error);
+  }
   return identifier;
 };
 
 const requestPermission = async (): Promise<boolean> => {
   const notifications = getNotifications();
   if (!notifications) return false;
-  await notifications.setNotificationChannelAsync(channelId, {
-    name: 'Category reminders',
-    description: 'Recurring reminders to enter category data.',
-    importance: notifications.AndroidImportance.HIGH,
-    sound: 'default',
-  });
-  const current = await notifications.getPermissionsAsync();
-  if (
-    current.granted ||
-    current.ios?.status === notifications.IosAuthorizationStatus.PROVISIONAL
-  ) {
-    return true;
+  try {
+    await notifications.setNotificationChannelAsync(channelId, {
+      name: 'Category reminders',
+      description: 'Recurring reminders to enter category data.',
+      importance: notifications.AndroidImportance.HIGH,
+      sound: 'default',
+    });
+    const current = await notifications.getPermissionsAsync();
+    if (
+      current.granted ||
+      current.ios?.status === notifications.IosAuthorizationStatus.PROVISIONAL
+    ) {
+      return true;
+    }
+    const requested = await notifications.requestPermissionsAsync();
+    return (
+      requested.granted ||
+      requested.ios?.status === notifications.IosAuthorizationStatus.PROVISIONAL
+    );
+  } catch (error) {
+    warnUnsupported(error);
+    return false;
   }
-  const requested = await notifications.requestPermissionsAsync();
-  return (
-    requested.granted ||
-    requested.ios?.status === notifications.IosAuthorizationStatus.PROVISIONAL
-  );
 };
 
 const scheduleCategory = async (
@@ -112,51 +139,60 @@ const scheduleCategory = async (
 ): Promise<string[]> => {
   const notifications = getNotifications();
   if (!notifications) return [];
-  const categoryIdentifier = await registerCategory(category);
-  return Promise.all(
-    specs.map((spec) =>
-      notifications.scheduleNotificationAsync({
-        content: {
-          title: `Enter ${category.name}`,
-          body: `Log today's ${category.name}.`,
-          categoryIdentifier,
-          data: {
-            source: 'category-reminder',
-            categoryId: category.id,
-            timeId: spec.timeId,
-          },
-          sound: 'default',
-        },
-        trigger: spec.weekday
-          ? {
-              type: notifications.SchedulableTriggerInputTypes.WEEKLY,
-              weekday: spec.weekday,
-              hour: spec.hour,
-              minute: spec.minute,
-              channelId,
-            }
-          : {
-              type: notifications.SchedulableTriggerInputTypes.DAILY,
-              hour: spec.hour,
-              minute: spec.minute,
-              channelId,
+  try {
+    const categoryIdentifier = await registerCategory(category);
+    return await Promise.all(
+      specs.map((spec) =>
+        notifications.scheduleNotificationAsync({
+          content: {
+            title: `Enter ${category.name}`,
+            body: `Log today's ${category.name}.`,
+            categoryIdentifier,
+            data: {
+              source: 'category-reminder',
+              categoryId: category.id,
+              timeId: spec.timeId,
             },
-      }),
-    ),
-  );
+            sound: 'default',
+          },
+          trigger: spec.weekday
+            ? {
+                type: notifications.SchedulableTriggerInputTypes.WEEKLY,
+                weekday: spec.weekday,
+                hour: spec.hour,
+                minute: spec.minute,
+                channelId,
+              }
+            : {
+                type: notifications.SchedulableTriggerInputTypes.DAILY,
+                hour: spec.hour,
+                minute: spec.minute,
+                channelId,
+              },
+        }),
+      ),
+    );
+  } catch (error) {
+    warnUnsupported(error);
+    return [];
+  }
 };
 
 const cancelCategory = async (categoryId: string): Promise<void> => {
   const notifications = getNotifications();
   if (!notifications) return;
-  const scheduled = await notifications.getAllScheduledNotificationsAsync();
-  await Promise.all(
-    scheduled
-      .filter((request) => request.content.data?.categoryId === categoryId)
-      .map((request) =>
-        notifications.cancelScheduledNotificationAsync(request.identifier),
-      ),
-  );
+  try {
+    const scheduled = await notifications.getAllScheduledNotificationsAsync();
+    await Promise.all(
+      scheduled
+        .filter((request) => request.content.data?.categoryId === categoryId)
+        .map((request) =>
+          notifications.cancelScheduledNotificationAsync(request.identifier),
+        ),
+    );
+  } catch (error) {
+    warnUnsupported(error);
+  }
 };
 
 const toResponseData = (
@@ -183,17 +219,27 @@ const addResponseListener = (
 ) => {
   const notifications = getNotifications();
   if (!notifications) return { remove: () => undefined };
-  return notifications.addNotificationResponseReceivedListener((response) => {
-    const data = toResponseData(response);
-    if (data) listener(data);
-  });
+  try {
+    return notifications.addNotificationResponseReceivedListener((response) => {
+      const data = toResponseData(response);
+      if (data) listener(data);
+    });
+  } catch (error) {
+    warnUnsupported(error);
+    return { remove: () => undefined };
+  }
 };
 
 const getLastResponse = async (): Promise<NotificationResponseData | null> => {
   const notifications = getNotifications();
   if (!notifications) return null;
-  const response = await notifications.getLastNotificationResponseAsync();
-  return response ? toResponseData(response) : null;
+  try {
+    const response = await notifications.getLastNotificationResponseAsync();
+    return response ? toResponseData(response) : null;
+  } catch (error) {
+    warnUnsupported(error);
+    return null;
+  }
 };
 
 export const notificationService: NotificationService = {

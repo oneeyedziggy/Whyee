@@ -4,11 +4,11 @@ import {
   ActivityIndicator,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import {
   createTransferArchives,
   createTransferBundle,
@@ -166,7 +166,10 @@ export const ExportDataModal = ({
             <X color={colors.text} size={21} />
           </Pressable>
         </View>
-        <ScrollView contentContainerStyle={styles.content}>
+        <KeyboardAwareScrollView
+          contentContainerStyle={styles.content}
+          keyboardDismissMode="on-drag"
+        >
           <Text style={styles.sectionTitle}>Workspaces</Text>
           {workspaces.map((workspace) => {
             const selected = selection.workspaces[workspace.id];
@@ -256,7 +259,7 @@ export const ExportDataModal = ({
             ))}
           </View>
           {error ? <Text style={styles.error}>{error}</Text> : null}
-        </ScrollView>
+        </KeyboardAwareScrollView>
         <Pressable
           accessibilityRole="button"
           disabled={!hasSelection || busy}

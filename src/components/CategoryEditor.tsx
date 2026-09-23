@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Settings } from 'lucide-react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   createChoiceOption,
   makeInverseSeries,
@@ -38,7 +39,8 @@ import {
 } from './CategoryEditorControls';
 import { InfoLink } from './InfoLink';
 import { NotificationSettings } from './NotificationSettings';
-import { SystemScreen } from './SystemScreen';
+import { ContextMenu } from './ContextMenu';
+import { confirmAction } from '../lib/confirm';
 
 interface CategoryEditorProps {
   visible: boolean;
@@ -108,12 +110,12 @@ export const CategoryEditor = ({
       visible={visible}
       animationType={desktop ? 'fade' : 'slide'}
       transparent={desktop}
-      statusBarTranslucent={!desktop && Platform.OS === 'android'}
       onRequestClose={onClose}
-      presentationStyle={desktop ? 'overFullScreen' : 'fullScreen'}
+      presentationStyle={desktop ? 'overFullScreen' : 'pageSheet'}
+      statusBarTranslucent={!desktop && Platform.OS === 'android'}
     >
-      <SystemScreen
-        enabled={!desktop}
+      <SafeAreaView
+        edges={desktop ? [] : ['top', 'bottom']}
         style={desktop ? styles.desktopBackdrop : styles.mobileModal}
       >
         {desktop ? (
@@ -141,7 +143,7 @@ export const CategoryEditor = ({
             },
           ]}
         >
-          <View style={styles.heading}>
+          <View style={[styles.heading, !desktop && styles.headingMobile]}>
             <View>
               <Text style={styles.headingTitle}>Category editor</Text>
               <Text style={styles.caption}>Select a category to edit it.</Text>
@@ -176,6 +178,7 @@ export const CategoryEditor = ({
               onAddCategoryToGroup={onAddCategoryToGroup}
               onDragChange={setDragging}
               onMove={onMoveCategory}
+              onDelete={onDelete}
               onSetNotification={
                 notificationSupported
                   ? (category) => setNotificationCategoryId(category.id)
@@ -210,7 +213,7 @@ export const CategoryEditor = ({
             />
           ) : null}
         </Animated.View>
-      </SystemScreen>
+      </SafeAreaView>
     </Modal>
   );
 };
@@ -232,6 +235,7 @@ const DraggableCategoryList = ({
   onAddCategoryToGroup,
   onDragChange,
   onMove,
+  onDelete,
   onSetNotification,
 }: {
   groups: CategoryGroup[];
@@ -247,6 +251,7 @@ const DraggableCategoryList = ({
     targetGroupId: string,
     targetIndex: number,
   ) => void;
+  onDelete: (id: string) => void;
   onSetNotification?: (category: CategoryDefinition) => void;
 }) => {
   const slots = useMemo(() => {
@@ -355,15 +360,37 @@ const DraggableCategoryList = ({
                 ⠿
               </Text>
             </View>
-            {onSetNotification ? (
-              <Pressable
-                accessibilityLabel={`Set notification for ${category.name}`}
-                accessibilityRole="button"
-                onPress={() => onSetNotification(category)}
-                style={styles.notificationButton}
-              >
-                <Settings color={colors.primary} size={18} />
-              </Pressable>
+            {onSetNotification || onDelete ? (
+              <ContextMenu
+                accessibilityLabel={`Category options for ${category.name}`}
+                renderTrigger={() => (
+                  <Settings color={colors.primary} size={18} />
+                )}
+                triggerStyle={styles.notificationButton}
+                items={[
+                  ...(onSetNotification
+                    ? [
+                        {
+                          key: 'notify',
+                          label: 'Set notification',
+                          onPress: () => onSetNotification(category),
+                        },
+                      ]
+                    : []),
+                  {
+                    key: 'delete',
+                    label: 'Delete category',
+                    destructive: true,
+                    onPress: () =>
+                      confirmAction(
+                        'Delete category',
+                        `Delete "${category.name}"? This cannot be undone.`,
+                        'Delete',
+                        () => onDelete(category.id),
+                      ),
+                  },
+                ]}
+              />
             ) : null}
           </View>
         );
@@ -488,10 +515,19 @@ const CategoryDetails = ({
       {category.kind === 'multiple-choice' ? (
         <ChoiceEditor
           multiSelect={category.multiSelect}
+          allowMultiplePerDay={category.allowMultiplePerDay}
+          optionSeriesMode={category.optionSeriesMode}
+          optionOccurrenceMode={category.optionOccurrenceMode}
           options={category.options}
-          onChange={(options) => onUpdate({ ...category, options })}
+          onChange={(options) => updateAndRecompute({ ...category, options })}
           onMultiSelectChange={(multiSelect) =>
             onUpdate({ ...category, multiSelect })
+          }
+          onOptionSeriesModeChange={(optionSeriesMode) =>
+            updateAndRecompute({ ...category, optionSeriesMode })
+          }
+          onOptionOccurrenceModeChange={(optionOccurrenceMode) =>
+            updateAndRecompute({ ...category, optionOccurrenceMode })
           }
           onDragChange={onDragChange}
         />
@@ -509,7 +545,14 @@ const CategoryDetails = ({
         <Button
           title="Remove category"
           color={colors.danger}
-          onPress={onDelete}
+          onPress={() =>
+            confirmAction(
+              'Delete category',
+              `Delete "${category.name}"? This cannot be undone.`,
+              'Delete',
+              onDelete,
+            )
+          }
         />
       </View>
     </View>
@@ -641,17 +684,29 @@ const CHOICE_ROW_HEIGHT = 44;
 
 const ChoiceEditor = ({
   multiSelect,
+  allowMultiplePerDay,
+  optionSeriesMode,
+  optionOccurrenceMode,
   options,
   onChange,
   onMultiSelectChange,
+  onOptionSeriesModeChange,
+  onOptionOccurrenceModeChange,
   onDragChange,
 }: {
   multiSelect: boolean;
+  allowMultiplePerDay: boolean;
+  optionSeriesMode: 'intensity' | 'items';
+  optionOccurrenceMode: 'sum' | 'capped';
   options: ChoiceOption[];
   onChange: (options: ChoiceOption[]) => void;
   onMultiSelectChange: (value: boolean) => void;
+  onOptionSeriesModeChange: (value: 'intensity' | 'items') => void;
+  onOptionOccurrenceModeChange: (value: 'sum' | 'capped') => void;
   onDragChange: (dragging: boolean) => void;
 }) => {
+  // An option can only be selected more than once a day via multi-select or repeated entries.
+  const canRepeatPerDay = multiSelect || allowMultiplePerDay;
   return (
     <View style={styles.choiceEditor}>
       <Text style={styles.inputLabel}>Choices</Text>
@@ -660,6 +715,37 @@ const ChoiceEditor = ({
         value={multiSelect}
         onChange={onMultiSelectChange}
       />
+      {canRepeatPerDay ? (
+        <View style={styles.configGroup}>
+          <Text style={styles.inputLabel}>Correlate as</Text>
+          <View style={styles.segmented}>
+            <Segment
+              label="Quality / Quantity / Intensity"
+              selected={optionSeriesMode === 'intensity'}
+              onPress={() => onOptionSeriesModeChange('intensity')}
+            />
+            <Segment
+              label="Separate items"
+              selected={optionSeriesMode === 'items'}
+              onPress={() => onOptionSeriesModeChange('items')}
+            />
+          </View>
+          {optionSeriesMode === 'items' ? (
+            <View style={styles.segmented}>
+              <Segment
+                label="Sum occurrences"
+                selected={optionOccurrenceMode === 'sum'}
+                onPress={() => onOptionOccurrenceModeChange('sum')}
+              />
+              <Segment
+                label="Any = 1"
+                selected={optionOccurrenceMode === 'capped'}
+                onPress={() => onOptionOccurrenceModeChange('capped')}
+              />
+            </View>
+          ) : null}
+        </View>
+      ) : null}
       <DraggableList
         items={options}
         keyFor={(option) => option.id}
@@ -914,6 +1000,7 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingBottom: 14,
   },
+  headingMobile: { paddingTop: 20 },
   headingTitle: { color: colors.text, fontSize: 23, fontWeight: '700' },
   caption: { color: colors.muted, fontSize: 12, marginTop: 2 },
   addRow: {
@@ -1029,11 +1116,52 @@ export const styles = StyleSheet.create({
     fontSize: 14,
   },
   segmented: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 14 },
+  segment: {
+    flexGrow: 1,
+    flexBasis: '45%',
+    borderColor: colors.border,
+    borderWidth: 1,
+    padding: 10,
+    alignItems: 'center',
+  },
   segmentSelected: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
+  segmentText: { color: colors.text, fontWeight: '700' },
   segmentTextSelected: { color: '#fff' },
+  switchRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 42,
+  },
+  switchLabel: { color: colors.text, flexShrink: 1, fontSize: 13 },
+  leader: { flex: 1, justifyContent: 'center', marginHorizontal: 8 },
+  leaderLine: {
+    borderBottomColor: '#c9d1dc',
+    borderBottomWidth: 1,
+    borderRadius: 1,
+    borderStyle: 'dotted',
+  },
+  hintButton: {
+    alignItems: 'center',
+    borderColor: colors.border,
+    borderRadius: 9,
+    borderWidth: 1,
+    height: 18,
+    justifyContent: 'center',
+    marginLeft: 6,
+    width: 18,
+  },
+  hintIcon: { color: colors.muted, fontSize: 11, fontWeight: '700' },
+  hintText: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 16,
+    marginBottom: 8,
+    paddingRight: 8,
+  },
   configGroup: { marginTop: 4 },
   aggregationChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   aggregationChoice: {
@@ -1079,8 +1207,8 @@ export const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 22,
     fontWeight: '400',
-    lineHeight: 32,
-    transform: [{ translateY: -2.5 }],
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   numeric: { marginTop: 4 },
   numericRow: { flexDirection: 'row', gap: 8 },

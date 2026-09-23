@@ -138,27 +138,6 @@ describe('virtual series recomputation', () => {
     }
   });
 
-  it('defaults date-spanning timer hours on and preserves an opt-out', () => {
-    const duration = createDefaultCategory('duration', 0);
-    const dailyHours = duration.virtualSeries.find(
-      (series) => series.field === 'durationHoursByDay',
-    );
-    expect(dailyHours?.enabled).not.toBe(false);
-
-    const recomputed = recomputeVirtualSeries({
-      ...duration,
-      virtualSeries: duration.virtualSeries.map((series) =>
-        series.field === 'durationHoursByDay'
-          ? { ...series, enabled: false }
-          : series,
-      ),
-    });
-    expect(
-      recomputed.find((series) => series.field === 'durationHoursByDay')
-        ?.enabled,
-    ).toBe(false);
-  });
-
   it('generates one binary series per option in separate-items mode', () => {
     const choice = createDefaultCategory('multiple-choice', 0);
     if (choice.kind !== 'multiple-choice') throw new Error('expected choice');

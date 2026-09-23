@@ -3,13 +3,16 @@ import {
   Button,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
+import {
+  KeyboardAwareScrollView,
+  type KeyboardAwareScrollViewRef,
+} from 'react-native-keyboard-controller';
 import {
   documentationSections,
   type DocumentationSectionId,
@@ -29,7 +32,7 @@ export const DocumentationModal = ({
   onClose,
 }: DocumentationModalProps) => {
   const { height } = useWindowDimensions();
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<KeyboardAwareScrollViewRef>(null);
   const sectionOffsets = useRef<
     Partial<Record<DocumentationSectionId, number>>
   >({});
@@ -93,9 +96,10 @@ export const DocumentationModal = ({
           autoCapitalize="none"
           autoCorrect={false}
         />
-        <ScrollView
+        <KeyboardAwareScrollView
           ref={scrollRef}
           contentContainerStyle={styles.content}
+          keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator
         >
@@ -136,7 +140,7 @@ export const DocumentationModal = ({
             </Text>
           )}
           <View style={{ height }} />
-        </ScrollView>
+        </KeyboardAwareScrollView>
       </SystemScreen>
     </Modal>
   );

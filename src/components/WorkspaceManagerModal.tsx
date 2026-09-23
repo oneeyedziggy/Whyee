@@ -5,13 +5,13 @@ import {
   Modal,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { isDuplicateWorkspaceName } from '../lib/workspaces';
 import { DraggableList } from './DraggableList';
 import { colors } from '../theme/tokens';
@@ -103,9 +103,10 @@ export const WorkspaceManagerModal = ({
             </View>
             <Button title="Done" onPress={onClose} />
           </View>
-          <ScrollView
+          <KeyboardAwareScrollView
             style={styles.scroll}
             contentContainerStyle={styles.content}
+            keyboardDismissMode="on-drag"
             scrollEnabled={!dragging}
           >
             <View style={styles.addCard}>
@@ -153,7 +154,7 @@ export const WorkspaceManagerModal = ({
               onDelete={onDelete}
               onDragChange={setDragging}
             />
-          </ScrollView>
+          </KeyboardAwareScrollView>
         </View>
       </SystemScreen>
     </Modal>
