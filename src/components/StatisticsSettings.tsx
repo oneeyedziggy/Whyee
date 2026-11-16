@@ -1,26 +1,26 @@
 import { useMemo, useState } from 'react';
 import {
-  Button,
   Modal,
   Platform,
   Pressable,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
+import { AppButton } from './AppButton';
 import { InfoLink } from './InfoLink';
 import { SystemScreen } from './SystemScreen';
+import { ToggleSwitch } from './ToggleSwitch';
 import {
   isStatisticEnabled,
   statisticsRegistry,
   type StatisticsSectionId,
   type StatisticsSettings as StatisticsSettingsState,
 } from '../lib/statistics';
-import { colors } from '../theme/tokens';
+import { colors, typeScale } from '../theme/tokens';
 
 interface StatisticsSettingsProps {
   visible: boolean;
@@ -47,7 +47,7 @@ export const StatisticsSettings = ({
   onClose,
 }: StatisticsSettingsProps) => {
   const [query, setQuery] = useState('');
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const desktop = width >= 900;
   const dialogWidth = Math.min(760, Math.round(width * 0.72));
   const [expanded, setExpanded] = useState<Set<StatisticsSectionId>>(
@@ -99,7 +99,10 @@ export const StatisticsSettings = ({
           style={[
             styles.root,
             desktop && styles.desktopDialog,
-            desktop && { width: dialogWidth },
+            desktop && {
+              width: dialogWidth,
+              height: Math.round(height * 0.86),
+            },
           ]}
         >
           <View style={styles.header}>
@@ -109,7 +112,7 @@ export const StatisticsSettings = ({
                 Disabled sections do not calculate.
               </Text>
             </View>
-            <Button title="Done" onPress={onClose} />
+            <AppButton title="Done" onPress={onClose} />
           </View>
           <TextInput
             accessibilityLabel="Search statistics settings"
@@ -120,6 +123,7 @@ export const StatisticsSettings = ({
             style={styles.search}
           />
           <KeyboardAwareScrollView
+            style={styles.scroller}
             contentContainerStyle={styles.content}
             keyboardDismissMode="on-drag"
             keyboardShouldPersistTaps="handled"
@@ -170,15 +174,10 @@ export const StatisticsSettings = ({
                               {item.description}
                             </Text>
                           </View>
-                          <Switch
+                          <ToggleSwitch
                             accessibilityLabel={`Enable ${item.label}`}
                             value={isStatisticEnabled(settings, item.id)}
                             onValueChange={() => toggle(item.id)}
-                            thumbColor={
-                              isStatisticEnabled(settings, item.id)
-                                ? colors.primary
-                                : '#fff'
-                            }
                           />
                         </View>
                       ))
@@ -211,21 +210,28 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: 14,
     borderWidth: 1,
-    flex: 0,
-    maxHeight: '86%',
+    flexBasis: 'auto',
+    flexGrow: 0,
+    flexShrink: 0,
     overflow: 'hidden',
     paddingTop: 24,
   },
   header: {
     alignItems: 'center',
+    flexShrink: 0,
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingHorizontal: 18,
     paddingBottom: 14,
   },
-  title: { color: colors.text, fontSize: 23, fontWeight: '700' },
+  title: {
+    color: colors.text,
+    fontSize: typeScale.screenTitle,
+    fontWeight: '700',
+  },
   subtitle: { color: colors.muted, fontSize: 13, marginTop: 3 },
   search: {
+    flexShrink: 0,
     backgroundColor: colors.surface,
     borderColor: colors.border,
     borderRadius: 7,
@@ -236,6 +242,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
+  scroller: { flex: 1, minHeight: 0 },
   content: { gap: 12, padding: 18, paddingTop: 4, paddingBottom: 36 },
   categoryLink: {
     backgroundColor: colors.primarySoft,

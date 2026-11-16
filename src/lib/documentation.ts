@@ -150,37 +150,19 @@ export const documentationSections: DocumentationSection[] = [
   {
     id: 'weekly-effects',
     title: 'Weekly effects',
-    summary: 'Measure whether a category follows a weekly cycle.',
-    body: 'Weekly effect is an opt-in category setting for choice and number categories. Internally, weekday phase is represented by sine and cosine components so Sunday and Saturday remain adjacent. The app combines their correlations into one score and reports the strongest weekday phase and offset.',
-    keywords: [
-      'weekly',
-      'weekday',
-      'cyclic',
-      'sine',
-      'cosine',
-      'phase',
-      'effect',
-    ],
+    summary: 'Correlate categories with individual days of the week.',
+    body: 'Turn on "Correlate with weekdays" for a choice or number category to add seven series to the correlation matrix: Sunday is 1 on Sundays and 0 on every other day that has data, and so on through Saturday. "Correlate with inverse weekdays" adds Not Sunday through Not Saturday, which are the reverse (0 on that weekday, 1 on the rest). Weekday series are only correlated with categories that opted in, are never correlated with each other, and are only compared on the same day, so correlation offsets do not apply to them.',
+    keywords: ['weekly', 'weekday', 'day of week', 'effect', 'inverse'],
     details: [
       {
-        term: 'Sine / cosine phase',
+        term: 'Weekday series',
         description:
-          'Days of the week are cyclic (Saturday is adjacent to Sunday, not far from it), so the app encodes weekday as a point on a circle instead of a plain 0-6 number, which would wrongly treat Sunday and Saturday as opposite ends.',
+          'A strong positive correlation between a category and, for example, Friday means its values tend to be higher on Fridays than on other days.',
       },
       {
-        term: 'Weekly score',
+        term: 'Inverse weekday series',
         description:
-          'How strongly this category repeats on a 7-day cycle, from 0 (no weekly pattern detected) to 1 (a strong, consistent weekly pattern).',
-      },
-      {
-        term: 'Weekday phase',
-        description:
-          'The specific day of week the pattern is centered on (for example, values tend to peak on Fridays).',
-      },
-      {
-        term: 'Offset',
-        description:
-          'How many days after that weekday the effect actually peaks, when the peak does not land exactly on the named weekday.',
+          'The same comparison read the other way: a strong positive correlation with Not Sunday means values tend to be lower on Sundays.',
       },
     ],
   },
@@ -259,7 +241,7 @@ export const documentationSections: DocumentationSection[] = [
       {
         term: 'Autocorrelation',
         description:
-          "How strongly a category's own value on one day predicts its value again a fixed number of days later (the recent-days window). This measures self-repeating patterns, separate from the weekly-cycle detection described under Weekly effects.",
+          "How strongly a category's own value on one day predicts its value again a fixed number of days later (the recent-days window). This measures self-repeating patterns, separate from the weekday series described under Weekly effects.",
       },
     ],
   },

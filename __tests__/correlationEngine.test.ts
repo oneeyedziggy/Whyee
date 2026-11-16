@@ -7,6 +7,7 @@ import {
   pearson,
 } from '../src/lib/correlationEngine';
 import {
+  canCorrelate,
   computePreparedCorrelationRange,
   getPreparedCorrelationCellCount,
   mergePreparedCorrelationCells,
@@ -31,6 +32,64 @@ import {
   isStatisticEnabled,
   statisticsRegistry,
 } from '../src/lib/statistics';
+
+describe('correlation edge cases', () => {
+  it('returns null for mismatched, too-short, or zero-variance inputs', () => {
+    expect(pearson([1, 2, 3], [1, 2])).toBeNull();
+    expect(pearson([1], [1])).toBeNull();
+    expect(pearson([], [])).toBeNull();
+    expect(pearson([1, 2, 3], [5, 5, 5])).toBeNull();
+    expect(pearson([4, 4], [1, 2])).toBeNull();
+  });
+
+  it('yields a null cell when either category has no daily series', () => {
+    const series = buildDailySeries({
+      categories: [],
+      records: [
+        { categoryId: 'a', dateKey: '2026-01-01', value: 1 },
+        { categoryId: 'a', dateKey: '2026-01-02', value: 2 },
+      ],
+      offsets: [0],
+    });
+    expect(computeCorrelationCell('a', 'missing', 0, series)).toEqual({
+      offset: 0,
+      value: null,
+    });
+    expect(computeCorrelationCell('missing', 'a', 0, series)).toEqual({
+      offset: 0,
+      value: null,
+    });
+  });
+
+  it.each([
+    [{}, {}, true],
+    [{ scopeGroupId: 'g' }, { groupId: 'g' }, true],
+    [{ scopeGroupId: 'g' }, { groupId: 'other' }, false],
+    [{ scopeGroupId: 'g' }, { groupId: 'other', global: true }, true],
+    [{ groupId: 'g' }, { scopeGroupId: 'g' }, true],
+    [{ groupId: 'other' }, { scopeGroupId: 'g' }, false],
+    [{ groupId: 'other', global: true }, { scopeGroupId: 'g' }, true],
+    [{ family: 'weekday' }, { family: 'weekday' }, false],
+    [{ family: 'weekday' }, { family: 'other' }, true],
+    [{ pairsOnlyWith: 'weekday' }, {}, false],
+    [{ pairsOnlyWith: 'weekday' }, { tags: ['weekday-inverse'] }, false],
+    [{ pairsOnlyWith: 'weekday' }, { tags: ['weekday'] }, true],
+    [{ tags: ['weekday'] }, { pairsOnlyWith: 'weekday' }, true],
+    [{}, { pairsOnlyWith: 'weekday' }, false],
+    [
+      { pairsOnlyWith: 'weekday', global: true },
+      { tags: ['weekday'], scopeGroupId: 'g' },
+      true,
+    ],
+  ])('canCorrelate(%o, %o) is %p', (left, right, expected) => {
+    expect(
+      canCorrelate(
+        { id: 'l', name: 'L', ...left },
+        { id: 'r', name: 'R', ...right },
+      ),
+    ).toBe(expected);
+  });
+});
 
 describe('correlation engine', () => {
   it('calculates Pearson correlation', () => {
@@ -345,11 +404,7 @@ describe('correlation engine', () => {
     );
 
     expect(input.categories.map((category) => category.name)).toEqual(
-      expect.arrayContaining([
-        'Focus total duration',
-        'Steps total',
-        'Steps count',
-      ]),
+      expect.arrayContaining(['Focus duration', 'Steps']),
     );
     expect(input.records.some((record) => record.value === 5000)).toBe(true);
   });
@@ -607,7 +662,7 @@ describe('correlation engine', () => {
         .map((record) => record.value),
     ).toEqual([4, 2]);
     expect(
-      input.records.find((record) => record.categoryId.includes(':startTime:'))
+      input.records.find((record) => record.categoryId.endsWith(':start'))
         ?.value,
     ).toBe(32462003);
   });
@@ -652,11 +707,157 @@ describe('correlation engine', () => {
     );
   });
 
+  describe('weekday indicator series', () => {
+    // 2026-01-04 is a Sunday; two full weeks of data.
+    const dateKeys = Array.from(
+      { length: 14 },
+      (_, index) => `2026-01-${String(4 + index).padStart(2, '0')}`,
+    );
+    const mood = {
+      ...createDefaultCategory('number', 0, 'Mood'),
+      weeklyEffectEnabled: true,
+      weeklyEffectInverseEnabled: true,
+    } as ReturnType<typeof createDefaultCategory>;
+    const sleep = createDefaultCategory('number', 1, 'Sleep');
+    const records = Object.fromEntries(
+      dateKeys.flatMap((dateKey, index) =>
+        [mood, sleep].map((category) => [
+          `${category.id}:${dateKey}`,
+          {
+            key: `${category.id}:${dateKey}`,
+            categoryId: category.id,
+            dateKey,
+            ordinal: 0,
+            localTime: '09:00:00',
+            // Mood is high only on Fridays (index 5 and 12).
+            value: category === mood ? (index % 7 === 5 ? 5 : 1) : index + 1,
+          },
+        ]),
+      ),
+    );
+    const input = createVirtualCorrelationInput([mood, sleep], records, [0, 1]);
+    const seriesValues = (id: string) =>
+      input.records
+        .filter((record) => record.categoryId === id)
+        .map((record) => record.value);
+
+    it('adds seven 1/0 weekday series and their inverses over recorded dates', () => {
+      const weekdaySeries = input.categories.filter(
+        (series) => series.family === 'weekday',
+      );
+      expect(weekdaySeries.map((series) => series.name)).toEqual([
+        'Sunday',
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday',
+        'Not Sunday',
+        'Not Monday',
+        'Not Tuesday',
+        'Not Wednesday',
+        'Not Thursday',
+        'Not Friday',
+        'Not Saturday',
+      ]);
+      expect(weekdaySeries[0]).toMatchObject({
+        id: 'weekday:1',
+        global: true,
+        pairsOnlyWith: 'weekday',
+        sameDayOnly: true,
+      });
+      expect(weekdaySeries[7]).toMatchObject({
+        id: 'weekday:1:inverse',
+        pairsOnlyWith: 'weekday-inverse',
+      });
+      expect(seriesValues('weekday:1')).toEqual(
+        dateKeys.map((_, index) => (index % 7 === 0 ? 1 : 0)),
+      );
+      expect(seriesValues('weekday:6:inverse')).toEqual(
+        dateKeys.map((_, index) => (index % 7 === 5 ? 0 : 1)),
+      );
+    });
+
+    it('tags only opted-in categories', () => {
+      const moodSeries = input.categories.filter((series) =>
+        series.name.startsWith('Mood'),
+      );
+      const sleepSeries = input.categories.filter((series) =>
+        series.name.startsWith('Sleep'),
+      );
+      expect(moodSeries.length).toBeGreaterThan(0);
+      for (const series of moodSeries)
+        expect(series.tags).toEqual(['weekday', 'weekday-inverse']);
+      for (const series of sleepSeries) expect(series.tags).toBeUndefined();
+    });
+
+    it('pairs weekdays only with opted-in categories at offset 0', () => {
+      const rows = computeRows(input);
+      const familyOf = (id: string) =>
+        input.categories.find((series) => series.id === id)?.family;
+      const weekdayRows = rows.filter(
+        (row) =>
+          familyOf(row.leftCategoryId) === 'weekday' ||
+          familyOf(row.rightCategoryId) === 'weekday',
+      );
+      expect(weekdayRows.length).toBeGreaterThan(0);
+      for (const row of weekdayRows) {
+        const other =
+          familyOf(row.leftCategoryId) === 'weekday'
+            ? row.rightCategoryId
+            : row.leftCategoryId;
+        expect(familyOf(other)).toBeUndefined();
+        expect(other.startsWith('calendar:')).toBe(false);
+        expect(
+          input.categories.find((series) => series.id === other)?.tags,
+        ).toBeDefined();
+      }
+
+      const moodId = input.categories.find(
+        (series) => series.name === 'Mood',
+      )!.id;
+      const cells = (weekdayId: string) =>
+        rows.find(
+          (row) =>
+            row.leftCategoryId === weekdayId && row.rightCategoryId === moodId,
+        )!.cells;
+      expect(cells('weekday:6')[0].value).toBeCloseTo(1);
+      expect(cells('weekday:6:inverse')[0].value).toBeCloseTo(-1);
+      expect(cells('weekday:6')[1]).toEqual({ offset: 1, value: null });
+    });
+
+    it('applies the same-day rule on the async path', async () => {
+      const rows = await computeRowsAsync(input);
+      const row = rows.find(
+        (candidate) => candidate.leftCategoryId === 'weekday:6',
+      )!;
+      expect(row.cells[1]).toEqual({ offset: 1, value: null });
+    });
+
+    it('skips weekday series for kinds that cannot opt in or when switched off', () => {
+      const notes = {
+        ...createDefaultCategory('notes', 0, 'Journal'),
+        weeklyEffectEnabled: true,
+      } as unknown as ReturnType<typeof createDefaultCategory>;
+      const off = {
+        ...createDefaultCategory('number', 1, 'Off'),
+        weeklyEffectEnabled: false,
+        weeklyEffectInverseEnabled: false,
+      } as ReturnType<typeof createDefaultCategory>;
+      const plain = createVirtualCorrelationInput([notes, off], records, [0]);
+      expect(
+        plain.categories.some(
+          (series) => series.family === 'weekday' || series.tags,
+        ),
+      ).toBe(false);
+    });
+  });
+
   it('produces per-option binary series for separate-items choice categories', () => {
     const base = createDefaultCategory('multiple-choice', 0, 'Symptoms');
     if (base.kind !== 'multiple-choice') throw new Error('expected choice');
-    // Jest mocks expo-crypto's randomUUID as undefined, so default options share
-    // one id; use explicit distinct ids so per-option series ids don't collide.
+    // Use explicit option ids so the expected per-option series ids are stable.
     const options = [
       { id: 'headache', label: 'Headache', value: 0 },
       { id: 'nausea', label: 'Nausea', value: 1 },

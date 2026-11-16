@@ -1,7 +1,9 @@
-import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import * as React from 'react';
+import { HoverTitle } from './HoverTitle';
+import { ToggleSwitch } from './ToggleSwitch';
 import type { CategoryDefinition } from '../types/category';
-import { colors } from '../theme/tokens';
+import { colors, shadows } from '../theme/tokens';
 
 export const Segment = ({
   label,
@@ -41,6 +43,172 @@ export const NotesEditor = () => (
   </Text>
 );
 
+const HintToggle = ({
+  label,
+  onPress,
+}: {
+  label: string;
+  onPress: () => void;
+}) => (
+  <Pressable
+    accessibilityLabel={`What does ${label} mean?`}
+    accessibilityRole="button"
+    hitSlop={8}
+    onPress={onPress}
+    style={styles.hintButton}
+  >
+    <Text style={styles.hintIcon}>?</Text>
+  </Pressable>
+);
+
+export const HintLabel = ({
+  label,
+  description,
+}: {
+  label: string;
+  description: string;
+}) => {
+  const [showDescription, setShowDescription] = React.useState(false);
+  return (
+    <View>
+      <View style={styles.hintLabelRow}>
+        <Text style={styles.inputLabel}>{label}</Text>
+        <HintToggle
+          label={label}
+          onPress={() => setShowDescription((current) => !current)}
+        />
+      </View>
+      {showDescription ? (
+        <Text style={styles.hintText}>{description}</Text>
+      ) : null}
+    </View>
+  );
+};
+
+export const CompactSwitch = ({
+  accessibilityLabel,
+  value,
+  disabled,
+  onChange,
+}: {
+  accessibilityLabel: string;
+  value: boolean;
+  disabled?: boolean;
+  onChange: (value: boolean) => void;
+}) => {
+  const subject = accessibilityLabel.replace(/^Enable(?: category)? /, '');
+  return (
+    <HoverTitle text={`${value ? 'Disable' : 'Enable'} ${subject}`}>
+      <ToggleSwitch
+        accessibilityLabel={accessibilityLabel}
+        accessibilityHint={`Turn ${value ? 'off' : 'on'} ${subject}.`}
+        value={value}
+        disabled={disabled}
+        onValueChange={onChange}
+      />
+    </HoverTitle>
+  );
+};
+
+export const AddButton = ({
+  accessibilityLabel,
+  accessibilityHint = 'Adds an item.',
+  text,
+  disabled = false,
+  onPress,
+}: {
+  accessibilityLabel: string;
+  accessibilityHint?: string;
+  text?: string;
+  disabled?: boolean;
+  onPress: () => void;
+}) => {
+  const button = (
+    <Pressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={[styles.addButton, disabled && styles.addButtonDisabled]}
+    >
+      <Text style={styles.addIcon} selectable={false}>
+        +
+      </Text>
+    </Pressable>
+  );
+  const tooltip = disabled ? accessibilityHint : accessibilityLabel;
+  return text ? (
+    <View style={styles.addActionRow}>
+      <Text style={styles.addActionLabel}>{text}</Text>
+      <HoverTitle text={tooltip}>{button}</HoverTitle>
+    </View>
+  ) : (
+    <HoverTitle text={tooltip}>{button}</HoverTitle>
+  );
+};
+
+export const SeriesToggleRow = ({
+  label,
+  description,
+  inverse,
+  main,
+  nested,
+  onInverseChange,
+  onMainChange,
+}: {
+  label: string;
+  description: string;
+  inverse: boolean;
+  main: boolean;
+  nested?: boolean;
+  onInverseChange: (value: boolean) => void;
+  onMainChange: (value: boolean) => void;
+}) => {
+  const [showDescription, setShowDescription] = React.useState(false);
+  return (
+    <View style={nested && styles.seriesNested}>
+      <View style={styles.switchRow}>
+        <Text style={styles.switchLabel} numberOfLines={2}>
+          {label}
+        </Text>
+        <HintToggle
+          label={label}
+          onPress={() => setShowDescription((current) => !current)}
+        />
+        <View style={styles.leader}>
+          <View style={styles.leaderLine} />
+        </View>
+        <View style={styles.seriesColumn}>
+          <CompactSwitch
+            accessibilityLabel={`Enable inverse correlation of ${label}`}
+            value={inverse}
+            onChange={onInverseChange}
+          />
+        </View>
+        <View style={styles.seriesColumn}>
+          <CompactSwitch
+            accessibilityLabel={`Enable correlation of ${label}`}
+            value={main}
+            onChange={onMainChange}
+          />
+        </View>
+      </View>
+      {showDescription ? (
+        <Text style={styles.hintText}>{description}</Text>
+      ) : null}
+    </View>
+  );
+};
+
+export const SeriesToggleHeader = () => (
+  <View style={styles.seriesHeader}>
+    <Text style={[styles.seriesColumn, styles.seriesHeading]}>Inverse</Text>
+    <Text style={[styles.seriesColumn, styles.seriesHeading]}>Main</Text>
+  </View>
+);
+
 export const SwitchRow = ({
   label,
   value,
@@ -62,26 +230,19 @@ export const SwitchRow = ({
           {label}
         </Text>
         {description ? (
-          <Pressable
-            accessibilityLabel={`What does ${label} mean?`}
-            accessibilityRole="button"
+          <HintToggle
+            label={label}
             onPress={() => setShowDescription((current) => !current)}
-            style={styles.hintButton}
-          >
-            <Text style={styles.hintIcon}>?</Text>
-          </Pressable>
+          />
         ) : null}
         <View style={styles.leader}>
           <View style={styles.leaderLine} />
         </View>
-        <Switch
+        <ToggleSwitch
           accessibilityLabel={label}
-          accessibilityState={{ checked: value, disabled }}
           value={value}
           disabled={disabled}
           onValueChange={onChange}
-          trackColor={{ false: colors.border, true: colors.primarySoft }}
-          thumbColor={value ? colors.primary : '#fff'}
         />
       </View>
       {description && showDescription ? (
@@ -114,6 +275,16 @@ const styles = StyleSheet.create({
     minHeight: 42,
   },
   switchLabel: { color: colors.text, flexShrink: 1, fontSize: 13 },
+  seriesHeader: { flexDirection: 'row', justifyContent: 'flex-end' },
+  seriesColumn: { alignItems: 'center', width: 64 },
+  seriesHeading: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+    textTransform: 'uppercase',
+  },
+  seriesNested: { paddingLeft: 12 },
   leader: { flex: 1, justifyContent: 'center', marginHorizontal: 8 },
   leaderLine: {
     borderBottomColor: '#c9d1dc',
@@ -132,6 +303,28 @@ const styles = StyleSheet.create({
     width: 18,
   },
   hintIcon: { color: colors.muted, fontSize: 11, fontWeight: '700' },
+  hintLabelRow: { alignItems: 'center', flexDirection: 'row', marginBottom: 5 },
+  inputLabel: { color: colors.text, fontSize: 13, fontWeight: '700' },
+  addActionRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+  addActionLabel: { color: colors.text, fontSize: 13, fontWeight: '700' },
+  addButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    boxShadow: shadows.soft,
+    borderRadius: 16,
+    height: 32,
+    justifyContent: 'center',
+    width: 32,
+  },
+  addButtonDisabled: { backgroundColor: '#6b7280' },
+  addIcon: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '400',
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+    top: -2.5,
+  },
   hintText: {
     color: colors.muted,
     fontSize: 12,

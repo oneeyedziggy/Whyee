@@ -20,8 +20,13 @@ export type VirtualSeriesField =
   | 'stopTime'
   | 'durationMs'
   | 'noteText'
-  | 'optionSelected';
+  | 'optionSelected'
+  | 'noteWordCount'
+  | 'noteLength'
+  | 'noteAverageWordLength'
+  | 'noteDistinctWords';
 
+// 'inverse' only appears on legacy standalone series; current series use `inverseEnabled`.
 export type VirtualSeriesTransform = 'sentimentScore' | 'inverse';
 
 export interface VirtualSeriesDefinition {
@@ -31,6 +36,9 @@ export interface VirtualSeriesDefinition {
   field: VirtualSeriesField;
   aggregation: SummaryVerb;
   enabled?: boolean;
+  inverseEnabled?: boolean;
+  // Editor heading for multiple-per-day summary sets; absent for single-entry series.
+  group?: string;
   transform?: VirtualSeriesTransform;
   perInstance?: boolean;
   // Only set (and used) when field is 'optionSelected'; the ChoiceOption value this series tracks.
@@ -78,7 +86,8 @@ export interface BaseCategory {
   sentimentEnabled: boolean;
   correlateWithinGroup: boolean;
   allowMultiplePerDay: boolean;
-  mainAggregation: SummaryVerb;
+  // Legacy setting; only read to pick which daily summary series starts enabled.
+  mainAggregation?: SummaryVerb;
   virtualSeries: VirtualSeriesDefinition[];
   notificationSchedule?: NotificationSchedule;
   savedTypeSettings?: Partial<Record<CategoryKind, CategoryDefinition>>;
@@ -89,12 +98,18 @@ export interface CategoryGroup {
   name: string;
   categoryIds: string[];
   expanded: boolean;
+  // Absent means enabled. While disabled, `suspendedCategoryIds` remembers which members were
+  // already individually disabled so re-enabling restores their own states rather than all-on.
+  enabled?: boolean;
+  suspendedCategoryIds?: string[];
 }
 
 export interface ChoiceCategory extends BaseCategory {
   kind: 'multiple-choice';
   multiSelect: boolean;
   weeklyEffectEnabled: boolean;
+  weeklyEffectInverseEnabled?: boolean;
+  showOptionValues?: boolean;
   options: ChoiceOption[];
   // 'intensity': one aggregated numeric series. 'items': one binary series per option.
   optionSeriesMode: 'intensity' | 'items';
@@ -105,6 +120,7 @@ export interface ChoiceCategory extends BaseCategory {
 export interface NumericCategory extends BaseCategory {
   kind: 'number';
   weeklyEffectEnabled: boolean;
+  weeklyEffectInverseEnabled?: boolean;
   range: NumericRangeConfig;
 }
 
@@ -162,6 +178,8 @@ export interface CategorySelectionRecord {
     stopTime: string;
     durationMs: number;
   }>;
+  // Set once the stop date is picked by hand; disables next-day rollover until Stop is pressed again.
+  stopDateManual?: boolean;
   noteText?: string;
   sentimentScore?: number;
 }

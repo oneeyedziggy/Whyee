@@ -9,6 +9,13 @@ export interface CorrelationInputCategory {
   groupId?: string;
   scopeGroupId?: string;
   global?: boolean;
+  /** Series sharing a family are never paired, e.g. weekday indicators that are deterministic functions of each other. */
+  family?: string;
+  /** When set, this series only pairs with series whose `tags` include this value. */
+  pairsOnlyWith?: string;
+  tags?: string[];
+  /** Only meaningful at offset 0; cells at other offsets are left empty. */
+  sameDayOnly?: boolean;
 }
 
 export interface CorrelationRow {

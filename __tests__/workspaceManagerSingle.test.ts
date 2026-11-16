@@ -26,6 +26,6 @@ it('keeps the last workspace undeletable', async () => {
   expect(
     screen.getByLabelText('Delete User').props.accessibilityState.disabled,
   ).toBe(true);
-  fireEvent.press(screen.getByLabelText('Delete User'));
+  await fireEvent.press(screen.getByLabelText('Delete User'));
   expect(onDelete).not.toHaveBeenCalled();
 });

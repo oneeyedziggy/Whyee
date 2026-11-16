@@ -69,17 +69,17 @@ describe('WorkspaceManagerModal', () => {
     const onDelete = jest.fn();
     const screen = await renderModal({ onAdd, onUpdate, onDelete });
 
-    fireEvent.changeText(screen.getByLabelText('New workspace name'), 'user');
+    await fireEvent.changeText(screen.getByLabelText('New workspace name'), 'user');
     await waitFor(() =>
       expect(
         screen.getByText('A workspace with that name already exists.'),
       ).toBeTruthy(),
     );
-    fireEvent.press(screen.getByText('Add workspace'));
+    await fireEvent.press(screen.getByText('Add workspace'));
     expect(onAdd).not.toHaveBeenCalled();
 
-    fireEvent.changeText(screen.getByLabelText('New workspace name'), 'Sleep');
-    fireEvent.changeText(
+    await fireEvent.changeText(screen.getByLabelText('New workspace name'), 'Sleep');
+    await fireEvent.changeText(
       screen.getByLabelText('New workspace notes'),
       'Bedtime experiments',
     );
@@ -88,22 +88,22 @@ describe('WorkspaceManagerModal', () => {
         'Bedtime experiments',
       ),
     );
-    fireEvent.press(screen.getByText('Add workspace'));
+    await fireEvent.press(screen.getByText('Add workspace'));
     expect(onAdd).toHaveBeenCalledWith('Sleep', 'Bedtime experiments');
 
-    fireEvent.changeText(screen.getByLabelText('Rename User'), 'Primary');
+    await fireEvent.changeText(screen.getByLabelText('Rename User'), 'Primary');
     expect(onUpdate).toHaveBeenCalledWith('user', { name: 'Primary' });
 
-    fireEvent.changeText(screen.getByLabelText('Notes for User'), 'Updated');
+    await fireEvent.changeText(screen.getByLabelText('Notes for User'), 'Updated');
     expect(onUpdate).toHaveBeenCalledWith('user', { notes: 'Updated' });
 
-    fireEvent.press(screen.getByLabelText('Hide User from the workspace bar'));
+    await fireEvent.press(screen.getByLabelText('Hide User from the workspace bar'));
     expect(onUpdate).toHaveBeenCalledWith('user', { hidden: true });
 
-    fireEvent.press(screen.getByLabelText('Show Test in the workspace bar'));
+    await fireEvent.press(screen.getByLabelText('Show Test in the workspace bar'));
     expect(onUpdate).toHaveBeenCalledWith('test', { hidden: false });
 
-    fireEvent.press(screen.getByLabelText('Delete Test'));
+    await fireEvent.press(screen.getByLabelText('Delete Test'));
     expect(onDelete).toHaveBeenCalledWith('test');
   });
 });

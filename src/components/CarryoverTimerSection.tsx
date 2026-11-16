@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { DurationInput } from './CategoryInputCard';
+import { DurationInput } from './DurationInput';
 import { calendarDayDiff, formatHumanDate } from '../lib/dates';
 import { colors } from '../theme/tokens';
 import type {
@@ -81,20 +81,19 @@ const CarryoverTimerRow = ({
 }) => {
   const running = Boolean(record.startTime && !record.stopTime);
   const viewedDate = new Date(`${viewedDateKey}T00:00:00`);
-  const startDate = record.startTime ? new Date(record.startTime) : null;
+  // findCarryoverTimers only returns records with a parseable start.
+  const startDate = new Date(record.startTime!);
   // Start is always in the past relative to a carryover's viewed date, so its offset is negative;
   // the end (stop, or "still running" as of now) offset is only shown when it's NOT this same date.
-  const startOffset = startDate ? calendarDayDiff(viewedDate, startDate) : 0;
+  const startOffset = calendarDayDiff(viewedDate, startDate);
   const endDate = record.stopTime ? new Date(record.stopTime) : new Date();
   const endOffset = calendarDayDiff(viewedDate, endDate);
   return (
     <View style={styles.row}>
       <Text style={styles.name}>{category.name}</Text>
-      {startDate ? (
-        <Text style={styles.meta}>
-          Started {formatOffset(startOffset)} ({formatHumanDate(startDate)})
-        </Text>
-      ) : null}
+      <Text style={styles.meta}>
+        Started {formatOffset(startOffset)} ({formatHumanDate(startDate)})
+      </Text>
       {endOffset !== 0 ? (
         <Text style={styles.meta}>
           {running ? 'Still running' : 'Stopped'} {formatOffset(endOffset)} (
@@ -104,12 +103,10 @@ const CarryoverTimerRow = ({
       <DurationInput
         category={category}
         entry={record}
-        entries={[record]}
         index={0}
         dateKey={record.dateKey}
         isLast
         onChange={onChange}
-        onAddEntry={() => {}}
         blocked={!actionable}
         carryoverMode
       />

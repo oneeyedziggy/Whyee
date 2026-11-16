@@ -35,6 +35,17 @@ export const canCorrelate = (
   second: CorrelationInputCategory,
 ): boolean => {
   'worklet';
+  if (first.family && first.family === second.family) return false;
+  if (
+    first.pairsOnlyWith &&
+    !(second.tags ?? []).includes(first.pairsOnlyWith)
+  )
+    return false;
+  if (
+    second.pairsOnlyWith &&
+    !(first.tags ?? []).includes(second.pairsOnlyWith)
+  )
+    return false;
   if (
     first.scopeGroupId &&
     !second.global &&
@@ -182,6 +193,19 @@ export const computePreparedCorrelationCell = (
   };
 };
 
+// Same-day-only series (weekday indicators) are meaningless when shifted, so other offsets stay empty.
+export const computePreparedPairCell = (
+  first: CorrelationInputCategory,
+  second: CorrelationInputCategory,
+  offset: number,
+  prepared: PreparedCorrelation,
+): { offset: number; value: number | null } => {
+  'worklet';
+  if (offset !== 0 && (first.sameDayOnly || second.sameDayOnly))
+    return { offset, value: null };
+  return computePreparedCorrelationCell(first.id, second.id, offset, prepared);
+};
+
 export const computePreparedCorrelationRange = (
   prepared: PreparedCorrelation,
   start: number,
@@ -197,9 +221,9 @@ export const computePreparedCorrelationRange = (
     const pair = prepared.pairs[Math.floor(directionalPairIndex / 2)];
     const first = directionalPairIndex % 2 === 0 ? pair.left : pair.right;
     const second = directionalPairIndex % 2 === 0 ? pair.right : pair.left;
-    const cell = computePreparedCorrelationCell(
-      first.id,
-      second.id,
+    const cell = computePreparedPairCell(
+      first,
+      second,
       prepared.offsets[offsetIndex],
       prepared,
     );

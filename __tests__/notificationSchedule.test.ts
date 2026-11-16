@@ -89,3 +89,57 @@ describe('notification schedules', () => {
     ]);
   });
 });
+
+describe('notification schedule edge cases', () => {
+  it('returns undefined for a missing schedule and coerces enabled to a boolean', () => {
+    expect(normalizeNotificationSchedule(undefined)).toBeUndefined();
+    expect(
+      normalizeNotificationSchedule({
+        enabled: 'yes' as unknown as boolean,
+        times: [],
+      }),
+    ).toEqual({ enabled: false, times: [] });
+  });
+
+  it('drops malformed times and treats missing weekdays as none', () => {
+    expect(
+      normalizeNotificationSchedule({
+        enabled: true,
+        times: [
+          { id: '', hour: 8, minute: 0, weekdays: [1] },
+          { id: 'bad-hour', hour: 24, minute: 0, weekdays: [1] },
+          { id: 'neg-hour', hour: -1, minute: 0, weekdays: [1] },
+          { id: 'frac', hour: 8.5, minute: 0, weekdays: [1] },
+          { id: 'bad-minute', hour: 8, minute: 60, weekdays: [1] },
+          { id: 'neg-minute', hour: 8, minute: -1, weekdays: [1] },
+          { id: 'frac-minute', hour: 8, minute: 0.5, weekdays: [1] },
+          { id: 7 as unknown as string, hour: 8, minute: 0, weekdays: [1] },
+          { id: 'no-days', hour: 7, minute: 0 } as never,
+          { id: 'b', hour: 9, minute: 0, weekdays: [1.5, 3] },
+          { id: 'a', hour: 9, minute: 0, weekdays: [4] },
+          { id: 'c', hour: 9, minute: 5, weekdays: [4] },
+        ],
+      }),
+    ).toEqual({
+      enabled: true,
+      times: [
+        { id: 'no-days', hour: 7, minute: 0, weekdays: [] },
+        { id: 'a', hour: 9, minute: 0, weekdays: [4] },
+        { id: 'b', hour: 9, minute: 0, weekdays: [3] },
+        { id: 'c', hour: 9, minute: 5, weekdays: [4] },
+      ],
+    });
+  });
+
+  it('schedules nothing when disabled, missing, or a time has no weekdays', () => {
+    const times = [{ id: 'm', hour: 8, minute: 0, weekdays: [2] }];
+    expect(expandNotificationSchedule({ enabled: false, times })).toEqual([]);
+    expect(expandNotificationSchedule(undefined as never)).toEqual([]);
+    expect(
+      expandNotificationSchedule({
+        enabled: true,
+        times: [{ id: 'm', hour: 8, minute: 0, weekdays: [] }, ...times],
+      }),
+    ).toEqual([{ timeId: 'm', hour: 8, minute: 0, weekday: 2 }]);
+  });
+});

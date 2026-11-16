@@ -4,7 +4,7 @@ import type {
   CorrelationRow,
 } from '../types/correlation';
 import {
-  computePreparedCorrelationCell,
+  computePreparedPairCell,
   createPreparedCorrelationRows,
   prepareCorrelation,
 } from './correlationKernel';
@@ -18,25 +18,6 @@ export class CorrelationCancelledError extends Error {
 
 const throwIfCancelled = (cancellation?: CorrelationCancellation): void => {
   if (cancellation?.cancelled) throw new CorrelationCancelledError();
-};
-
-const canCorrelate = (
-  first: CorrelationRequest['categories'][number],
-  second: CorrelationRequest['categories'][number],
-): boolean => {
-  if (
-    first.scopeGroupId &&
-    !second.global &&
-    second.groupId !== first.scopeGroupId
-  )
-    return false;
-  if (
-    second.scopeGroupId &&
-    !first.global &&
-    first.groupId !== second.scopeGroupId
-  )
-    return false;
-  return true;
 };
 
 const formatDateKey = (date: Date): string => {
@@ -185,13 +166,8 @@ export const computeRowsProgressively = async (
         [left, right],
         [right, left],
       ] as const) {
-        const cell = computePreparedCorrelationCell(
-          first.id,
-          second.id,
-          offset,
-          prepared,
-        );
-        rowByPair.get(`${first.id}:${second.id}`)?.cells.push(cell);
+        const cell = computePreparedPairCell(first, second, offset, prepared);
+        rowByPair.get(`${first.id}:${second.id}`)!.cells.push(cell);
         onCell?.({
           leftCategoryId: first.id,
           rightCategoryId: second.id,

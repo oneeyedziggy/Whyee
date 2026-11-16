@@ -24,6 +24,10 @@ Data, settings, and running duration timestamps are persisted locally. Most app
 functionality works offline after installation. EAS cloud builds and Expo's
 tunnel service require internet access.
 
+Duration **Resume w/ gap** starts a new run at the current time, preserving the
+paused gap. **Resume w/o gap** resumes from the displayed stop time so the pause
+counts toward the duration. Both honor edits to that stop time.
+
 ## Structure
 
 - [App.tsx](App.tsx) — app entry component
@@ -104,6 +108,21 @@ npm run android
 npm run ios
 npm run web
 ```
+
+### Development test workspaces
+
+Test fixtures are hidden until you create a workspace named `testChoice`,
+`testNumber`, `testDuration`, `testCounter`, `testNotes`, or `testData`
+(case-insensitive). `testChoice` copies the original test workspace's categories,
+groups, and complete saved history when present. The type-specific workspaces
+include 53 days of deterministic history, lagged/constant/noisy series, missing
+days, repeated entries, and type-specific boundaries. `testData` showcases two
+modes of each category type with history.
+
+The original test workspace stays hidden and its stored data is preserved.
+Fixture generators and name triggers are excluded from production bundles;
+creating these names in production makes ordinary workspaces. Previously saved
+or imported workspace data is not deleted.
 
 `npm run android` and `npm run ios` require the corresponding native SDK and
 device/emulator environment. iOS native builds require macOS.

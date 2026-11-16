@@ -34,6 +34,26 @@ export const moveToDropIndex = <T>(
   return next;
 };
 
+export const relativeRowOffsets = (
+  positions: Array<number | undefined>,
+  sizes: number[],
+): number[] => {
+  if (
+    positions.length === sizes.length &&
+    positions.length > 0 &&
+    positions.every((position): position is number => Number.isFinite(position))
+  ) {
+    const origin = positions[0];
+    return positions.map((position) => position - origin);
+  }
+  let running = 0;
+  return sizes.map((size) => {
+    const offset = running;
+    running += size;
+    return offset;
+  });
+};
+
 // Drag-to-reorder for a vertical list of rows with possibly-uneven heights.
 // The dragged row must stay mounted for the whole gesture (see registerHeight/
 // panHandlersFor usage below) or the OS/RN responder session gets terminated
@@ -57,6 +77,7 @@ export const useDragReorder = ({
   minBoundary = 0,
 }: UseDragReorderOptions) => {
   const heights = useRef<Record<string, number>>({});
+  const positions = useRef<Record<string, number>>({});
   const layout = useRef<{ offsets: number[]; sizes: number[] }>({
     offsets: [],
     sizes: [],
@@ -68,7 +89,7 @@ export const useDragReorder = ({
   const dragState = useRef({ index: -1, drop: -1, startY: 0 });
   // The responder below is created once, so every callback has to read the
   // current props through this ref instead of a stale render closure.
-  const options = useRef<UseDragReorderOptions>({
+  const options = useRef<UseDragReorderOptions & { minBoundary: number }>({
     length,
     keyFor,
     fallbackHeightFor,
@@ -87,22 +108,22 @@ export const useDragReorder = ({
 
   const measure = () => {
     const current = options.current;
-    let running = 0;
-    const offsets: number[] = [];
     const sizes: number[] = [];
+    const rowPositions: Array<number | undefined> = [];
     for (let index = 0; index < current.length; index += 1) {
-      const height =
-        heights.current[current.keyFor(index)] ??
-        current.fallbackHeightFor(index);
-      offsets.push(running);
+      const key = current.keyFor(index);
+      const height = heights.current[key] ?? current.fallbackHeightFor(index);
+      rowPositions.push(positions.current[key]);
       sizes.push(height);
-      running += height;
     }
-    layout.current = { offsets, sizes };
+    layout.current = {
+      offsets: relativeRowOffsets(rowPositions, sizes),
+      sizes,
+    };
   };
 
   const boundaryFor = (pointerY: number): number => {
-    const { length: count, minBoundary: floor = 0 } = options.current;
+    const { length: count, minBoundary: floor } = options.current;
     const { offsets, sizes } = layout.current;
     for (let index = floor; index < count; index += 1) {
       if (pointerY < offsets[index] + sizes[index] / 2) return index;
@@ -121,12 +142,15 @@ export const useDragReorder = ({
   };
 
   // Stable identity so memoized rows are not invalidated by every render.
-  const registerHeight = useRef((key: string, height: number) => {
-    // Layout reported mid-drag reflects the collapsed row and the drop gap, so
-    // it would corrupt the measurements used for the next gesture.
-    if (dragState.current.index >= 0) return;
-    heights.current[key] = height;
-  }).current;
+  const registerHeight = useRef(
+    (key: string, position: number, height: number) => {
+      // Layout reported mid-drag reflects the collapsed row and the drop gap, so
+      // it would corrupt the measurements used for the next gesture.
+      if (dragState.current.index >= 0) return;
+      heights.current[key] = height;
+      positions.current[key] = position;
+    },
+  ).current;
 
   // A single PanResponder for the whole list: re-creating it per render (which
   // happens on every drop-index change) resets its internal gesture state and
@@ -163,7 +187,7 @@ export const useDragReorder = ({
         const delta = gesture.moveY - startY;
         const pointerY = offsets[index] + sizes[index] / 2 + delta;
         const boundary = Math.max(
-          options.current.minBoundary ?? 0,
+          options.current.minBoundary,
           boundaryFor(pointerY),
         );
         if (boundary !== dragState.current.drop) {

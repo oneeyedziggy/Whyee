@@ -6,9 +6,32 @@ import type {
 } from '../types/category';
 import type { CorrelationRequest } from '../types/correlation';
 import type { CategoryGroup } from '../types/category';
+import { recomputeVirtualSeries } from './category';
 import { scoreSentiment } from './sentiment';
 
-const numericValue = (
+const noteWords = (text: string) =>
+  text
+    .trim()
+    .split(/\s+/)
+    .map((word) => word.replace(/[.,!?;:"()[\]{}]/g, ''))
+    .filter(Boolean);
+
+const noteMetric = (
+  text: string | undefined,
+  field: VirtualSeriesDefinition['field'],
+): number | null => {
+  if (!text?.trim()) return null;
+  const words = noteWords(text);
+  if (field === 'noteLength') return text.trim().length;
+  if (field === 'noteWordCount') return words.length;
+  if (field === 'noteDistinctWords')
+    return new Set(words.map((word) => word.toLowerCase())).size;
+  return words.length
+    ? words.reduce((total, word) => total + word.length, 0) / words.length
+    : null;
+};
+
+export const numericValue = (
   record: CategorySelectionRecord,
   field: VirtualSeriesDefinition['field'],
   transform?: VirtualSeriesDefinition['transform'],
@@ -17,6 +40,13 @@ const numericValue = (
   if (transform === 'sentimentScore')
     return record.sentimentScore ?? scoreSentiment(record.noteText ?? '');
   if (field === 'value') return record.value;
+  if (
+    field === 'noteWordCount' ||
+    field === 'noteLength' ||
+    field === 'noteAverageWordLength' ||
+    field === 'noteDistinctWords'
+  )
+    return noteMetric(record.noteText, field);
   if (field === 'optionSelected')
     return record.selectedValues?.includes(optionValue as number) ? 1 : 0;
   if (field === 'durationMs') return record.durationMs ?? null;
@@ -71,42 +101,88 @@ const calendarValue = (
   return field === 'weekday' ? date.getDay() + 1 : date.getDate();
 };
 
-const fieldDescriptions: Record<VirtualSeriesDefinition['field'], string> = {
-  value: 'the entered value',
-  startTime: 'the start time, as milliseconds since local midnight',
-  stopTime: 'the stop time, as milliseconds since local midnight',
-  durationMs: 'the elapsed duration in milliseconds',
-  noteText: 'the note text',
-  optionSelected: 'whether this choice was picked',
+export const weekdayNames = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
+export const weekdaySeriesFamily = 'weekday';
+export const weekdaySeriesTag = 'weekday';
+export const inverseWeekdaySeriesTag = 'weekday-inverse';
+
+const weeklyTags = (category: CategoryDefinition): string[] =>
+  category.kind === 'multiple-choice' || category.kind === 'number'
+    ? [
+        ...(category.weeklyEffectEnabled ? [weekdaySeriesTag] : []),
+        ...(category.weeklyEffectInverseEnabled
+          ? [inverseWeekdaySeriesTag]
+          : []),
+      ]
+    : [];
+
+const fieldNouns: Record<VirtualSeriesDefinition['field'], string> = {
+  value: 'entries',
+  startTime: 'start times',
+  stopTime: 'stop times',
+  durationMs: 'durations',
+  noteText: 'note sentiment scores',
+  optionSelected: 'choices',
+  noteWordCount: 'note word counts',
+  noteLength: 'note lengths',
+  noteAverageWordLength: 'average note word lengths',
+  noteDistinctWords: 'distinct note word counts',
 };
 
-const verbDescriptions: Record<SummaryVerb, string> = {
-  count: 'counted',
-  sum: 'added together',
-  product: 'multiplied together',
-  mean: 'averaged',
-  median: 'reduced to the middle value',
-  min: 'reduced to the smallest value',
-  max: 'reduced to the largest value',
+const singleDescriptions: Record<VirtualSeriesDefinition['field'], string> = {
+  value: 'Charts the entered value by date.',
+  startTime: 'Charts the start time of day by date.',
+  stopTime: 'Charts the stop time of day by date.',
+  durationMs: 'Charts the timed duration by date.',
+  noteText:
+    'Scores each note locally on a negative-to-positive scale. Note text never leaves this device.',
+  optionSelected: 'Charts whether this choice was picked by date.',
+  noteWordCount: "Charts the note's word count by date.",
+  noteLength: "Charts the note's length in characters by date.",
+  noteAverageWordLength: "Charts the note's average word length by date.",
+  noteDistinctWords: "Charts the note's number of distinct words by date.",
 };
+
+const timeStatWords: Partial<Record<SummaryVerb, string>> = {
+  min: 'earliest',
+  max: 'latest',
+};
+
+export const inverseSeriesDescription =
+  'Inverse correlates a mirrored copy of the series around its own average, so high days become low days. Main correlates the series as-is.';
 
 export const describeVirtualSeries = (
   definition: VirtualSeriesDefinition,
 ): string => {
-  if (definition.transform === 'sentimentScore')
-    return 'Scores each note locally on a negative-to-positive scale and averages the scores for the day. Note text never leaves this device.';
   if (definition.transform === 'inverse')
     return 'Mirrors the main series around its own average, so high days become low days. Useful for reading a correlation in the opposite direction.';
   if (definition.field === 'optionSelected')
     return definition.aggregation === 'sum'
       ? 'Counts how many times this choice was picked that day.'
       : '1 on days this choice was picked at least once, 0 otherwise.';
-  const scope = definition.perInstance
-    ? 'Treats every entry of the day as its own data point'
-    : `Takes ${fieldDescriptions[definition.field]} from every entry of the day, ${verbDescriptions[definition.aggregation]} into one number per day`;
-  return definition.perInstance
-    ? `${scope}, using ${fieldDescriptions[definition.field]} ${verbDescriptions[definition.aggregation]} within each entry.`
-    : `${scope}.`;
+  if (definition.perInstance)
+    return 'Tracks each entry position (1st, 2nd, …) as its own series.';
+  if (definition.group === undefined)
+    return singleDescriptions[definition.field];
+  if (definition.aggregation === 'count')
+    return 'Charts the number of entries per day.';
+  const isTime =
+    definition.field === 'startTime' || definition.field === 'stopTime';
+  const stat =
+    (isTime && timeStatWords[definition.aggregation]) || definition.aggregation;
+  const sentimentNote =
+    definition.transform === 'sentimentScore'
+      ? ' Notes are scored locally and never leave this device.'
+      : '';
+  return `Charts the ${stat} of each day's ${fieldNouns[definition.field]} by date.${sentimentNote}`;
 };
 
 export const createVirtualCorrelationInput = (
@@ -126,6 +202,7 @@ export const createVirtualCorrelationInput = (
     recordsByCategoryId.set(record.categoryId, categoryRecords);
   }
   const groupByCategoryId = new Map<string, string>();
+  const requestedWeeklyTags = new Set<string>();
   for (const group of groups)
     for (const categoryId of group.categoryIds)
       groupByCategoryId.set(categoryId, group.id);
@@ -147,66 +224,17 @@ export const createVirtualCorrelationInput = (
 
   for (const category of orderedCategories) {
     const groupId = groupByCategoryId.get(category.id);
-    const definitions: VirtualSeriesDefinition[] =
-      category.kind === 'notes'
-        ? []
-        : category.virtualSeries.length
-          ? category.virtualSeries
-          : category.allowMultiplePerDay
-            ? [
-                {
-                  id: `${category.id}:instance`,
-                  name: `${category.name} instance`,
-                  sourceCategoryId: category.id,
-                  field: 'value' as const,
-                  aggregation: 'mean' as const,
-                  perInstance: true,
-                },
-                {
-                  id: `${category.id}:sum`,
-                  name: `${category.name} sum`,
-                  sourceCategoryId: category.id,
-                  field: 'value' as const,
-                  aggregation: category.mainAggregation,
-                },
-                {
-                  id: `${category.id}:count`,
-                  name: `${category.name} count`,
-                  sourceCategoryId: category.id,
-                  field: 'value' as const,
-                  aggregation: 'count' as const,
-                },
-              ]
-            : [
-                {
-                  id: category.id,
-                  name: category.name,
-                  sourceCategoryId: category.id,
-                  field: 'value' as const,
-                  aggregation: 'mean' as const,
-                },
-              ];
-    const noteDefinitions: VirtualSeriesDefinition[] =
-      category.notesEnabled &&
-      category.sentimentEnabled &&
-      !definitions.some(
-        (definition) => definition.transform === 'sentimentScore',
-      )
-        ? [
-            {
-              id: `${category.id}:sentiment`,
-              name: `${category.name} sentiment`,
-              sourceCategoryId: category.id,
-              field: 'noteText' as const,
-              aggregation: 'mean' as const,
-              transform: 'sentimentScore' as const,
-            },
-          ]
-        : [];
+    const tags = weeklyTags(category);
+    for (const tag of tags) requestedWeeklyTags.add(tag);
+    const definitions: VirtualSeriesDefinition[] = category.virtualSeries.length
+      ? category.virtualSeries
+      : recomputeVirtualSeries(category);
     const categoryRecords = recordsByCategoryId.get(category.id) ?? [];
 
-    for (const definition of [...definitions, ...noteDefinitions]) {
-      if (definition.enabled === false) continue;
+    for (const definition of definitions) {
+      const includeBase = definition.enabled !== false;
+      const includeInverse = definition.inverseEnabled === true;
+      if (!includeBase && !includeInverse) continue;
       // Instances are the nth entry of a day, so records without an id group by ordinal.
       const instanceKey = (record: CategorySelectionRecord) =>
         record.instanceId ?? `${record.categoryId}:${record.ordinal}`;
@@ -228,12 +256,9 @@ export const createVirtualCorrelationInput = (
         const outputName = definition.perInstance
           ? `${definition.name} ${instanceRecords[0]?.ordinal !== undefined ? instanceRecords[0].ordinal + 1 : ''}`.trim()
           : definition.name;
-        inputCategories.push({
-          id: outputId,
-          name: outputName,
-          groupId,
-          scopeGroupId: category.correlateWithinGroup ? groupId : undefined,
-        });
+        const scopeGroupId = category.correlateWithinGroup
+          ? groupId
+          : undefined;
         const valuesByDate = new Map<string, number[]>();
         for (const record of instanceRecords) {
           const value = numericValue(
@@ -260,19 +285,75 @@ export const createVirtualCorrelationInput = (
           summarizedValues.map((entry) => entry.value),
           'mean',
         );
-        for (const entry of summarizedValues) {
-          const value =
-            definition.transform === 'inverse' && seriesMean !== null
-              ? 2 * seriesMean - entry.value
-              : entry.value;
-          inputRecords.push({
-            categoryId: outputId,
-            dateKey: entry.dateKey,
-            value,
+        // Only called for summarized values, so the mean always exists.
+        const mirror = (value: number) => 2 * seriesMean! - value;
+        const legacyInverse = definition.transform === 'inverse';
+        const outputs: Array<[string, string, boolean]> = [
+          ...(includeBase
+            ? [
+                [outputId, outputName, legacyInverse] as [
+                  string,
+                  string,
+                  boolean,
+                ],
+              ]
+            : []),
+          ...(includeInverse
+            ? [
+                [
+                  `${outputId}:inverse`,
+                  `${outputName} inverse`,
+                  !legacyInverse,
+                ] as [string, string, boolean],
+              ]
+            : []),
+        ];
+        for (const [id, name, mirrored] of outputs) {
+          inputCategories.push({
+            id,
+            name,
+            groupId,
+            scopeGroupId,
+            ...(tags.length ? { tags } : {}),
           });
+          for (const entry of summarizedValues)
+            inputRecords.push({
+              categoryId: id,
+              dateKey: entry.dateKey,
+              value: mirrored ? mirror(entry.value) : entry.value,
+            });
         }
       }
     }
+  }
+
+  const recordDates = new Set(allRecords.map((record) => record.dateKey));
+
+  // One 0/1 indicator per weekday over every recorded date; the inverse flips it.
+  for (const [tag, inverse] of [
+    [weekdaySeriesTag, false],
+    [inverseWeekdaySeriesTag, true],
+  ] as const) {
+    if (!requestedWeeklyTags.has(tag)) continue;
+    weekdayNames.forEach((weekdayName, index) => {
+      const id = `weekday:${index + 1}${inverse ? ':inverse' : ''}`;
+      inputCategories.push({
+        id,
+        name: inverse ? `Not ${weekdayName}` : weekdayName,
+        global: true,
+        family: weekdaySeriesFamily,
+        pairsOnlyWith: tag,
+        sameDayOnly: true,
+      });
+      for (const dateKey of recordDates) {
+        const matches = calendarValue(dateKey, 'weekday') === index + 1;
+        inputRecords.push({
+          categoryId: id,
+          dateKey,
+          value: matches !== inverse ? 1 : 0,
+        });
+      }
+    });
   }
 
   if (includeCalendar)
@@ -282,8 +363,7 @@ export const createVirtualCorrelationInput = (
         name: definition.name,
         global: true,
       });
-      const dates = new Set(allRecords.map((record) => record.dateKey));
-      for (const dateKey of dates) {
+      for (const dateKey of recordDates) {
         inputRecords.push({
           categoryId: definition.id,
           dateKey,

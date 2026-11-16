@@ -1,3 +1,6 @@
+const average = (values: number[]): number =>
+  values.reduce((sum, value) => sum + value, 0) / values.length;
+
 export const daysAgo = (dateKey: string, now: Date): number => {
   const [year, month, day] = dateKey.split('-').map(Number);
   return Math.floor(
@@ -8,9 +11,7 @@ export const daysAgo = (dateKey: string, now: Date): number => {
 };
 
 export const mean = (values: number[]): number | null =>
-  values.length
-    ? values.reduce((sum, value) => sum + value, 0) / values.length
-    : null;
+  values.length ? average(values) : null;
 
 export const median = (values: number[]): number | null => {
   if (!values.length) return null;
@@ -30,17 +31,18 @@ export const mode = (values: number[]): number | null => {
   )[0][0];
 };
 
+// With at least two evenly spaced x positions the x variance is always positive.
 export const slope = (values: number[]): number | null => {
   if (values.length < 2) return null;
   const meanX = (values.length - 1) / 2;
-  const meanY = mean(values) ?? 0;
+  const meanY = average(values);
   let numerator = 0;
   let denominator = 0;
   values.forEach((value, index) => {
     numerator += (index - meanX) * (value - meanY);
     denominator += (index - meanX) ** 2;
   });
-  return denominator ? numerator / denominator : null;
+  return numerator / denominator;
 };
 
 export const autocorrelation = (
@@ -50,8 +52,8 @@ export const autocorrelation = (
   if (lag <= 0 || values.length <= lag) return null;
   const left = values.slice(0, values.length - lag);
   const right = values.slice(lag);
-  const leftMean = mean(left) ?? 0;
-  const rightMean = mean(right) ?? 0;
+  const leftMean = average(left);
+  const rightMean = average(right);
   let numerator = 0;
   let leftDenominator = 0;
   let rightDenominator = 0;

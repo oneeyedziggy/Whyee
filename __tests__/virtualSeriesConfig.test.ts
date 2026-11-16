@@ -4,7 +4,10 @@ import {
   recomputeVirtualSeries,
   switchCategoryKind,
 } from '../src/lib/category';
-import { describeVirtualSeries } from '../src/lib/virtualSeries';
+import {
+  createVirtualCorrelationInput,
+  describeVirtualSeries,
+} from '../src/lib/virtualSeries';
 import {
   createDefaultStatisticsSettings,
   isStatisticEnabled,
@@ -40,9 +43,9 @@ describe('virtual series recomputation', () => {
     expect(multiple.some((series) => series.perInstance)).toBe(true);
   });
 
-  it('keeps exactly one inverse definition', () => {
+  it('migrates a legacy inverse series into the primary row inverse toggle', () => {
     const number = createDefaultCategory('number', 0);
-    const withInverse = recomputeVirtualSeries({
+    const migrated = recomputeVirtualSeries({
       ...number,
       virtualSeries: [
         ...recomputeVirtualSeries(number),
@@ -58,22 +61,170 @@ describe('virtual series recomputation', () => {
       ],
     });
 
-    expect(
-      withInverse.filter((series) => series.transform === 'inverse'),
-    ).toHaveLength(1);
+    expect(migrated.some((series) => series.transform === 'inverse')).toBe(
+      false,
+    );
+    expect(migrated).toEqual([
+      expect.objectContaining({
+        id: `${number.id}:value`,
+        enabled: true,
+        inverseEnabled: true,
+      }),
+    ]);
   });
 
-  it('gives notes categories a sentiment series instead of a raw series', () => {
+  it('adds default-off note metrics and keeps notes sentiment primary', () => {
     const notes = createDefaultCategory('notes', 0);
     expect(notes.sentimentEnabled).toBe(true);
 
     const withSentiment = recomputeVirtualSeries(notes);
 
-    expect(withSentiment).toHaveLength(1);
-    expect(withSentiment[0].transform).toBe('sentimentScore');
+    expect(withSentiment.map((series) => series.field)).toEqual([
+      'noteText',
+      'noteWordCount',
+      'noteLength',
+      'noteAverageWordLength',
+      'noteDistinctWords',
+    ]);
+    expect(withSentiment.map((series) => series.enabled)).toEqual([
+      true,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    const withoutSentiment = recomputeVirtualSeries({
+      ...notes,
+      sentimentEnabled: false,
+      virtualSeries: [],
+    });
+    expect(withoutSentiment).toHaveLength(4);
+    expect(withoutSentiment[0]).toMatchObject({
+      field: 'noteWordCount',
+      enabled: true,
+    });
+  });
+
+  it('projects note metrics from text', () => {
+    const notes = { ...createDefaultCategory('notes', 0), id: 'notes' };
+    notes.virtualSeries = recomputeVirtualSeries(notes).map((series) => ({
+      ...series,
+      enabled: series.field !== 'noteText',
+    }));
+    const input = createVirtualCorrelationInput(
+      [notes],
+      {
+        note: {
+          key: 'note',
+          categoryId: 'notes',
+          dateKey: '2026-01-01',
+          ordinal: 0,
+          localTime: '09:00:00',
+          value: 0,
+          noteText: 'Good day, good sleep!',
+        },
+      },
+      [0],
+      false,
+    );
+    const valueFor = (suffix: string) =>
+      input.records.find((record) => record.categoryId === `notes:${suffix}`)
+        ?.value;
+
+    expect(valueFor('note:words')).toBe(4);
+    expect(valueFor('note:length')).toBe(21);
+    expect(valueFor('note:word-length')).toBe(4);
+    expect(valueFor('note:distinct-words')).toBe(3);
+  });
+
+  it('hides redundant single-entry series and enables one daily summary by default', () => {
+    const number = createDefaultCategory('number', 0);
+    const counter = createDefaultCategory('counter', 1);
+    expect(recomputeVirtualSeries(number).map((series) => series.id)).toEqual([
+      `${number.id}:value`,
+    ]);
+    const multiple = recomputeVirtualSeries({
+      ...number,
+      allowMultiplePerDay: true,
+    });
     expect(
-      recomputeVirtualSeries({ ...notes, sentimentEnabled: false }),
-    ).toHaveLength(0);
+      multiple.filter((series) => series.enabled).map((series) => series.id),
+    ).toEqual([`${number.id}:value:mean`]);
+    expect(
+      recomputeVirtualSeries({ ...counter, allowMultiplePerDay: true })
+        .filter((series) => series.enabled)
+        .map((series) => series.id),
+    ).toEqual([`${counter.id}:value:sum`]);
+    expect(multiple.map((series) => series.aggregation)).toEqual(
+      expect.arrayContaining([
+        'count',
+        'mean',
+        'median',
+        'sum',
+        'product',
+        'min',
+        'max',
+      ]),
+    );
+  });
+
+  it('enables the stat matching a legacy main aggregation and preserves old flags', () => {
+    const number = {
+      ...createDefaultCategory('number', 0),
+      id: 'reading',
+      allowMultiplePerDay: true,
+      mainAggregation: 'max' as const,
+      virtualSeries: [
+        {
+          id: 'reading:sum',
+          name: 'Reading sum',
+          sourceCategoryId: 'reading',
+          field: 'value' as const,
+          aggregation: 'sum' as const,
+        },
+        {
+          id: 'reading:count',
+          name: 'Reading count',
+          sourceCategoryId: 'reading',
+          field: 'value' as const,
+          aggregation: 'count' as const,
+          enabled: false,
+        },
+      ],
+    };
+    const migrated = recomputeVirtualSeries(number);
+    const enabled = migrated
+      .filter((series) => series.enabled)
+      .map((series) => series.id);
+
+    expect(enabled).toEqual(['reading:value:sum', 'reading:value:max']);
+    expect(
+      recomputeVirtualSeries({ ...number, virtualSeries: migrated }),
+    ).toEqual(migrated);
+  });
+
+  it('describes daily summaries and entry positions concisely', () => {
+    const number = createDefaultCategory('number', 0);
+    const series = recomputeVirtualSeries({
+      ...number,
+      allowMultiplePerDay: true,
+    });
+    const describe = (aggregation: string, perInstance = false) =>
+      describeVirtualSeries(
+        series.find(
+          (candidate) =>
+            candidate.aggregation === aggregation &&
+            Boolean(candidate.perInstance) === perInstance,
+        )!,
+      );
+
+    expect(describe('sum')).toBe(
+      "Charts the sum of each day's entries by date.",
+    );
+    expect(describe('count')).toBe('Charts the number of entries per day.');
+    expect(describe('mean', true)).toBe(
+      'Tracks each entry position (1st, 2nd, …) as its own series.',
+    );
   });
 
   it('describes every generated series', () => {
@@ -113,29 +264,41 @@ describe('virtual series recomputation', () => {
     expect(getNextCategoryNameSequence([second], 'counter')).toBe(3);
   });
 
-  it('defaults weekly and calendar statistics off', () => {
+  it('defaults calendar statistics off', () => {
     const settings = createDefaultStatisticsSettings();
 
-    expect(isStatisticEnabled(settings, 'weekly.section')).toBe(false);
     expect(isStatisticEnabled(settings, 'calendar.section')).toBe(false);
-    expect(isStatisticEnabled(settings, 'summary.weekly-effect')).toBe(false);
-    expect(isStatisticEnabled(settings, 'summary.weekly-phase')).toBe(false);
-    expect(isStatisticEnabled(settings, 'summary.weekly-offset')).toBe(false);
   });
 
-  it('defaults optional duration series off', () => {
-    const duration = createDefaultCategory('duration', 0);
-    const disabledNames = [
-      'duration per entry',
-      'count',
-      'average start time',
-      'average stop time',
-    ];
-
-    for (const series of duration.virtualSeries) {
-      if (disabledNames.some((name) => series.name.endsWith(name)))
-        expect(series.enabled).toBe(false);
-    }
+  it('reduces single-entry durations to one duration, start time and stop time', () => {
+    const duration = createDefaultCategory('duration', 0, 'Sleep');
+    expect(duration.virtualSeries.map((series) => series.name)).toEqual([
+      'Sleep duration',
+      'Sleep start time',
+      'Sleep stop time',
+    ]);
+    const multiple = recomputeVirtualSeries({
+      ...duration,
+      allowMultiplePerDay: true,
+    });
+    expect(multiple.map((series) => series.name)).toEqual(
+      expect.arrayContaining([
+        'Sleep total duration',
+        'Sleep earliest start time',
+        'Sleep latest stop time',
+        'Sleep median stop time',
+      ]),
+    );
+    expect(
+      multiple.filter((series) => series.enabled).map((series) => series.name),
+    ).toEqual(['Sleep total duration']);
+    expect(
+      multiple.some(
+        (series) =>
+          series.aggregation === 'product' ||
+          (series.field !== 'durationMs' && series.aggregation === 'sum'),
+      ),
+    ).toBe(false);
   });
 
   it('generates one binary series per option in separate-items mode', () => {
@@ -194,8 +357,7 @@ describe('virtual series recomputation', () => {
   it('preserves per-option enabled state across option reorders', () => {
     const choice = createDefaultCategory('multiple-choice', 0);
     if (choice.kind !== 'multiple-choice') throw new Error('expected choice');
-    // Jest mocks expo-crypto's randomUUID as undefined, so default options share
-    // one id; use explicit distinct ids so per-option series ids don't collide.
+    // Use explicit option ids so the expected per-option series ids are stable.
     const options = [
       { id: 'option-a', label: 'A', value: 0 },
       { id: 'option-b', label: 'B', value: 1 },

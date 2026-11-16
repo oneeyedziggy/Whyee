@@ -21,7 +21,7 @@ export const createCorrelationTask = (
   const cancellation: CorrelationCancellation = { cancelled: false };
   let timer: ReturnType<typeof setTimeout> | null = null;
   let settled = false;
-  let rejectTask: ((reason?: unknown) => void) | null = null;
+  let rejectTask!: (reason?: unknown) => void;
   let pairCount = 0;
   for (let leftIndex = 0; leftIndex < request.categories.length; leftIndex += 1)
     for (
@@ -74,7 +74,7 @@ export const createCorrelationTask = (
       settled = true;
       cancellation.cancelled = true;
       if (timer) clearTimeout(timer);
-      rejectTask?.(new CorrelationCancelledError());
+      rejectTask(new CorrelationCancelledError());
     },
   };
 };

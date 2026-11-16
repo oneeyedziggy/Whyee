@@ -78,7 +78,6 @@ export const SystemTimeField = (props: SystemTimeFieldProps) => {
   const Icon = iconFor(mode);
 
   const open = () => {
-    if (disabled) return;
     if (Platform.OS === 'android') {
       openAndroid(props);
       return;
@@ -92,6 +91,7 @@ export const SystemTimeField = (props: SystemTimeFieldProps) => {
         accessibilityLabel={accessibilityLabel}
         accessibilityRole="button"
         disabled={disabled}
+        hitSlop={6}
         onPress={open}
         style={[
           styles.button,
@@ -99,10 +99,12 @@ export const SystemTimeField = (props: SystemTimeFieldProps) => {
           disabled && styles.buttonDisabled,
         ]}
       >
-        <Icon
-          color={disabled ? colors.muted : colors.primary}
-          size={compact ? 14 : 18}
-        />
+        <View pointerEvents="none">
+          <Icon
+            color={disabled ? colors.muted : colors.primary}
+            size={compact ? 14 : 18}
+          />
+        </View>
       </Pressable>
       {Platform.OS === 'ios' && iosVisible ? (
         <Modal
@@ -185,10 +187,12 @@ const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 8,
+    minHeight: 32,
+    minWidth: 28,
+    paddingHorizontal: 4,
     paddingVertical: 6,
   },
-  buttonCompact: { paddingHorizontal: 4, paddingVertical: 4 },
+  buttonCompact: { minHeight: 28, minWidth: 24, paddingHorizontal: 2 },
   buttonDisabled: { opacity: 0.5 },
   backdrop: {
     flex: 1,

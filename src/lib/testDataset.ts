@@ -1,13 +1,18 @@
 import { getLocalDateKey, makeRecordKey } from './dates';
+import { createDefaultCategory, recomputeVirtualSeries } from './category';
+import { scoreSentiment } from './sentiment';
 import type {
   CategoryDefinition,
+  CategoryGroup,
+  CategoryKind,
   CategorySelectionRecord,
   ChoiceOption,
 } from '../types/category';
 
-interface TestDataset {
+export interface TestDataset {
   categories: CategoryDefinition[];
   records: Record<string, CategorySelectionRecord>;
+  groups?: CategoryGroup[];
 }
 
 export const TEST_DATASET_SEED = 'correlation-app-test-dataset-v1';
@@ -29,7 +34,7 @@ const hashSeed = (seed: string): number => {
     hash ^= seed.charCodeAt(index);
     hash = Math.imul(hash, 0x01000193);
   }
-  return hash >>> 0 || 1;
+  return hash >>> 0;
 };
 const createSeededRandom = (seed: string): (() => number) => {
   let state = hashSeed(seed);
@@ -63,7 +68,6 @@ const createCategory = (
   sentimentEnabled: false,
   correlateWithinGroup: false,
   allowMultiplePerDay: false,
-  mainAggregation: 'mean',
   virtualSeries: [],
   weeklyEffectEnabled: false,
   multiSelect: false,
@@ -89,7 +93,7 @@ const transformPreservingExtremes = (
   middleMap: Record<number, number>,
 ): number[] =>
   series.map((value) =>
-    value === 0 || value === 4 ? value : (middleMap[value] ?? value),
+    value === 0 || value === 4 ? value : middleMap[value],
   );
 const buildPeakOnlySeries = (baseSeries: number[]): number[] => {
   const peakOrdinals = new Set([0, 2, 4]);
@@ -232,8 +236,7 @@ export const createBuiltInTestDataset = (
   ]);
   const records: Record<string, CategorySelectionRecord> = {};
   categories.forEach((category, categoryIndex) => {
-    const series = seriesByCategoryId.get(category.id);
-    if (!series) return;
+    const series = seriesByCategoryId.get(category.id)!;
     createDateWindow().forEach((dateKey, dayIndex) => {
       const key = makeRecordKey(dateKey, 0, category.id);
       records[key] = {
@@ -247,4 +250,229 @@ export const createBuiltInTestDataset = (
     });
   });
   return { categories, records };
+};
+
+interface DatasetCategorySpec {
+  id: string;
+  name: string;
+  kind: CategoryKind;
+  values: number[];
+  multiple?: boolean;
+  sparse?: boolean;
+  edge?: boolean;
+}
+
+const createTypedTestDataset = (specs: DatasetCategorySpec[]): TestDataset => {
+  const dates = createDateWindow();
+  const records: Record<string, CategorySelectionRecord> = {};
+  const categories = specs.map((spec, index) => {
+    let category: CategoryDefinition = {
+      ...createDefaultCategory(spec.kind, index, spec.name),
+      id: spec.id,
+      virtualSeries: [],
+      allowMultiplePerDay: spec.multiple ?? false,
+      sentimentEnabled: spec.kind === 'notes' && Boolean(spec.multiple),
+    };
+    if (category.kind === 'multiple-choice') {
+      category = {
+        ...category,
+        options: createOptions(5),
+        multiSelect: Boolean(spec.multiple),
+        optionSeriesMode: spec.multiple ? 'items' : 'intensity',
+        optionOccurrenceMode: spec.multiple ? 'sum' : 'capped',
+      };
+    } else if (category.kind === 'number') {
+      category = {
+        ...category,
+        range: spec.edge
+          ? { min: -100, max: 100, step: 0.25 }
+          : { min: 0, max: 4, step: 1 },
+      };
+    } else if (category.kind === 'duration') {
+      category = {
+        ...category,
+        duration: {
+          ...category.duration,
+          splitEnabled: Boolean(spec.multiple),
+          cumulative: Boolean(spec.multiple),
+          showMilliseconds: Boolean(spec.edge),
+          use24HourClock: !spec.multiple,
+        },
+      };
+    } else if (category.kind === 'counter') {
+      category = {
+        ...category,
+        counter: {
+          ...category.counter,
+          steps: spec.edge ? [-10, -1, 1, 10] : [-1, 1],
+          splitEnabled: Boolean(spec.multiple),
+          resetEnabled: Boolean(spec.multiple),
+          editable: !spec.multiple,
+        },
+      };
+    } else {
+      category = {
+        ...category,
+        notes: { sentimentEnabled: category.sentimentEnabled },
+      };
+    }
+    category = { ...category, virtualSeries: recomputeVirtualSeries(category) };
+    dates.forEach((dateKey, dayIndex) => {
+      if (spec.sparse && dayIndex % 3 !== 0) return;
+      const count = spec.multiple ? 1 + (dayIndex % 3) : 1;
+      for (let ordinal = 0; ordinal < count; ordinal += 1) {
+        const key = makeRecordKey(dateKey, ordinal, category.id);
+        const value = spec.values[(dayIndex + ordinal) % spec.values.length];
+        const entry: CategorySelectionRecord = {
+          key,
+          categoryId: category.id,
+          dateKey,
+          ordinal,
+          localTime: ordinal ? `1${ordinal}:00:00` : '09:00:00',
+          value,
+        };
+        if (category.kind === 'multiple-choice') {
+          entry.selectedValues = category.multiSelect
+            ? [...new Set([value, (value + 1) % category.options.length])]
+            : [value];
+        } else if (category.kind === 'duration') {
+          const durationMs = spec.edge
+            ? [0, 1, 999, 1001, 90061001][(dayIndex + ordinal) % 5]
+            : value * 15 * 60 * 1000;
+          const start = new Date(
+            `${dateKey}T${spec.edge ? '23:59:59' : entry.localTime}`,
+          );
+          const stop = new Date(start.getTime() + durationMs);
+          entry.startTime = start.toISOString();
+          entry.stopTime = stop.toISOString();
+          entry.durationMs = durationMs;
+          entry.durationMsExact = durationMs;
+          entry.value = durationMs;
+          entry.instanceId = key;
+          entry.durationRuns = [
+            {
+              startTime: entry.startTime,
+              stopTime: entry.stopTime,
+              durationMs,
+            },
+          ];
+        } else if (category.kind === 'notes') {
+          const noteText = spec.edge
+            ? [
+                '',
+                '   ',
+                '!!! ... ?',
+                'echo echo echo',
+                'Long note. '.repeat(120),
+              ][(dayIndex + ordinal) % 5]
+            : category.sentimentEnabled
+              ? [
+                  'terrible sad',
+                  'bad',
+                  'ordinary day',
+                  'good',
+                  'wonderful happy love',
+                ][value]
+              : Array.from({ length: value + 1 }, () => 'journal').join(' ');
+          entry.noteText = noteText;
+          entry.sentimentScore = scoreSentiment(noteText);
+          entry.value = entry.sentimentScore;
+        }
+        records[key] = entry;
+      }
+    });
+    return category;
+  });
+  return { categories, records };
+};
+
+const createTypeEdgeDataset = (
+  kind: Exclude<CategoryKind, 'multiple-choice'>,
+): TestDataset => {
+  const choices = createBuiltInTestDataset();
+  const dates = createDateWindow();
+  const specs: DatasetCategorySpec[] = choices.categories.map((category) => ({
+    id: `${kind}-${category.id}`,
+    name: category.name,
+    kind,
+    values: dates.map(
+      (date) => choices.records[makeRecordKey(date, 0, category.id)].value,
+    ),
+  }));
+  const baseValues = specs[0].values;
+  specs.push(
+    {
+      id: `test-${kind}-multiple`,
+      name: 'Multiple entries',
+      kind,
+      values: baseValues,
+      multiple: true,
+    },
+    {
+      id: `test-${kind}-sparse`,
+      name: 'Missing days',
+      kind,
+      values: baseValues,
+      sparse: true,
+    },
+    {
+      id: `test-${kind}-edges`,
+      name: kind === 'duration' ? 'Precision and overnight' : 'Boundary values',
+      kind,
+      values:
+        kind === 'number'
+          ? [-100, -0.25, 0, 0.25, 100]
+          : kind === 'counter'
+            ? [-1000, -1, 0, 1, 1000000]
+            : baseValues,
+      edge: true,
+    },
+  );
+  return createTypedTestDataset(specs);
+};
+
+const createShowcaseDataset = (): TestDataset => {
+  const values = sampleWindow(createDriverSeries());
+  const modes: Array<[CategoryKind, string, string]> = [
+    ['multiple-choice', 'Choice intensity', 'Choice items'],
+    ['number', 'Number slider', 'Number repeated readings'],
+    ['duration', 'Duration timer', 'Duration cumulative laps'],
+    ['counter', 'Counter editable', 'Counter split steps'],
+    ['notes', 'Notes word metrics', 'Notes sentiment journal'],
+  ];
+  return createTypedTestDataset(
+    modes.flatMap(([kind, single, multiple]) => [
+      { id: `showcase-${kind}-single`, name: single, kind, values },
+      {
+        id: `showcase-${kind}-multiple`,
+        name: multiple,
+        kind,
+        values,
+        multiple: true,
+      },
+    ]),
+  );
+};
+
+// Required only inside App's __DEV__ branch so Metro excludes the fixtures in releases.
+export const createTestWorkspaceDataset = (
+  name: string,
+  existingChoice?: TestDataset,
+): TestDataset | undefined => {
+  switch (name.trim().toLowerCase()) {
+    case 'testchoice':
+      return existingChoice ?? createBuiltInTestDataset();
+    case 'testnumber':
+      return createTypeEdgeDataset('number');
+    case 'testduration':
+      return createTypeEdgeDataset('duration');
+    case 'testcounter':
+      return createTypeEdgeDataset('counter');
+    case 'testnotes':
+      return createTypeEdgeDataset('notes');
+    case 'testdata':
+      return createShowcaseDataset();
+    default:
+      return undefined;
+  }
 };

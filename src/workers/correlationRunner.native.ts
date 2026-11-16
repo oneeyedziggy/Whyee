@@ -28,15 +28,17 @@ let workletsModule: typeof ReactNativeWorklets | null | undefined;
 let workerPool: ReactNativeWorklets.WorkletRuntime[] | null = null;
 let nextGeneration = 1;
 
-const getWorklets = (): typeof ReactNativeWorklets | null => {
-  if (workletsModule !== undefined) return workletsModule;
+const loadWorklets = (): typeof ReactNativeWorklets | null => {
   try {
-    workletsModule =
-      require('react-native-worklets') as typeof ReactNativeWorklets;
+    return require('react-native-worklets') as typeof ReactNativeWorklets;
   } catch {
-    workletsModule = null;
+    return null;
   }
-  return workletsModule ?? null;
+};
+
+const getWorklets = (): typeof ReactNativeWorklets | null => {
+  if (workletsModule === undefined) workletsModule = loadWorklets();
+  return workletsModule;
 };
 
 const getWorkerPool = (
@@ -86,8 +88,7 @@ export const runCorrelation = (
   const generation = nextGeneration;
   nextGeneration += 1;
   let cancelled = false;
-  let settled = false;
-  let rejectTask: ((reason?: unknown) => void) | null = null;
+  let rejectTask!: (reason?: unknown) => void;
 
   const execute = async (): Promise<CorrelationRow[]> => {
     const pool = getWorkerPool(worklets);
@@ -148,27 +149,15 @@ export const runCorrelation = (
 
   const promise = new Promise<CorrelationRow[]>((resolve, reject) => {
     rejectTask = reject;
-    execute().then(
-      (rows) => {
-        if (settled) return;
-        settled = true;
-        resolve(rows);
-      },
-      (error) => {
-        if (settled) return;
-        settled = true;
-        reject(error);
-      },
-    );
+    // Settling an already-cancelled promise is a no-op, so late results are dropped.
+    execute().then(resolve, reject);
   });
 
   return {
     promise,
     cancel: () => {
-      if (settled) return;
-      settled = true;
       cancelled = true;
-      rejectTask?.(new CorrelationCancelledError());
+      rejectTask(new CorrelationCancelledError());
     },
   };
 };

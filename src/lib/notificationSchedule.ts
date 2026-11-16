@@ -79,7 +79,3 @@ export const expandNotificationSchedule = (
     }));
   });
 };
-
-export const notificationScheduleHasMultipleTimes = (
-  schedule: NotificationSchedule | undefined,
-): boolean => (schedule?.times.length ?? 0) > 1;

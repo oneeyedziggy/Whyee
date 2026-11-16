@@ -13,6 +13,7 @@ import {
   mode,
   slope,
 } from '../lib/summaryStats';
+import { formatDurationValue } from '../lib/durationFormat';
 import {
   compareValues,
   nextSortDirection,
@@ -21,19 +22,41 @@ import {
 import { colors } from '../theme/tokens';
 import { Panel } from './Panel';
 import { SortHeader } from './SortHeader';
-import type { WeeklyEffectResult } from '../lib/weeklyEffects';
 
-// Rough bold-11px glyph width; wide enough for headers to avoid wrapping while
-// still shrinking short labels (e.g. "Mean") well below long ones (e.g. "Autocorrelation").
+// Bold 11px label plus the sort glyph and the cell's 8px side padding.
 const estimateColumnWidth = (label: string) =>
-  Math.max(56, Math.ceil(label.length * 6.2) + 28);
+  Math.max(64, Math.ceil(label.length * 7.2) + 44);
+
+const estimateCellWidth = (text: string) => Math.ceil(text.length * 6.1) + 18;
+
+// Columns whose value is in the category's own units, so duration categories report milliseconds.
+const durationStatIds = new Set<string>([
+  'summary.mean.all',
+  'summary.mean.recent',
+  'summary.median.all',
+  'summary.median.recent',
+  'summary.mode.all',
+  'summary.mode.recent',
+  'summary.slope.all',
+  'summary.slope.recent',
+]);
+
+const formatStat = (
+  category: CategoryDefinition,
+  id: string,
+  value: number | null,
+): string => {
+  if (value === null) return '--';
+  if (category.kind === 'duration' && durationStatIds.has(id))
+    return formatDurationValue(value, category.duration.showMilliseconds);
+  return value.toFixed(2);
+};
 
 interface SummaryPanelProps {
   categories: CategoryDefinition[];
   records: Record<string, CategorySelectionRecord>;
   recentDays: number;
   settings: StatisticsSettings;
-  weeklyEffects: WeeklyEffectResult[];
 }
 
 export const SummaryPanel = ({
@@ -41,7 +64,6 @@ export const SummaryPanel = ({
   records,
   recentDays,
   settings,
-  weeklyEffects,
 }: SummaryPanelProps) => {
   const needsAllTimeValues = [
     'summary.mean.all',
@@ -131,30 +153,6 @@ export const SummaryPanel = ({
       (row: (typeof rows)[number]) => autocorrelation(row.values, recentDays),
       `How strongly a value on one day predicts the value ${recentDays} days later, from -1 (opposite) to 1 (matching); near 0 means no relationship.`,
     ],
-    [
-      'summary.weekly-effect',
-      'Weekly',
-      (row: (typeof rows)[number]) =>
-        weeklyEffects.find((effect) => effect.categoryId === row.category.id)
-          ?.score ?? null,
-      'Strength of a repeating weekly pattern in this category, from 0 (none) to 1 (strong).',
-    ],
-    [
-      'summary.weekly-phase',
-      'Weekday',
-      (row: (typeof rows)[number]) =>
-        weeklyEffects.find((effect) => effect.categoryId === row.category.id)
-          ?.weekday ?? null,
-      'The day of week the weekly pattern is centered on.',
-    ],
-    [
-      'summary.weekly-offset',
-      'Weekly +d',
-      (row: (typeof rows)[number]) =>
-        weeklyEffects.find((effect) => effect.categoryId === row.category.id)
-          ?.offset ?? null,
-      'How many days after that weekday the pattern peaks.',
-    ],
   ] as const;
   const enabledColumns = columns.filter(([id]) =>
     isStatisticEnabled(settings, id),
@@ -163,9 +161,17 @@ export const SummaryPanel = ({
   const columnWidths = useMemo(
     () =>
       Object.fromEntries(
-        enabledColumns.map(([id, label]) => [id, estimateColumnWidth(label)]),
+        enabledColumns.map(([id, label, calculate]) => [
+          id,
+          Math.max(
+            estimateColumnWidth(label),
+            ...rows.map((row) =>
+              estimateCellWidth(formatStat(row.category, id, calculate(row))),
+            ),
+          ),
+        ]),
       ),
-    [enabledColumns],
+    [enabledColumns, rows],
   );
   const [sortColumn, setSortColumn] = useState('');
   const [sortDirection, setSortDirection] = useState<SortDirection>('default');
@@ -189,10 +195,7 @@ export const SummaryPanel = ({
         sortColumn === 'category'
           ? right.category.name
           : (column?.[2](right) ?? null);
-      return (
-        compareValues(leftValue, rightValue) *
-        (sortDirection === 'asc' ? 1 : -1)
-      );
+      return compareValues(leftValue, rightValue, sortDirection);
     });
   }, [enabledColumns, rows, sortColumn, sortDirection]);
   return (
@@ -227,17 +230,14 @@ export const SummaryPanel = ({
                 <Text style={styles.category} numberOfLines={1}>
                   {row.category.name}
                 </Text>
-                {enabledColumns.map(([id, , calculate]) => {
-                  const value = calculate(row);
-                  return (
-                    <Text
-                      key={id}
-                      style={[styles.value, { width: columnWidths[id] }]}
-                    >
-                      {value === null ? '--' : value.toFixed(2)}
-                    </Text>
-                  );
-                })}
+                {enabledColumns.map(([id, , calculate]) => (
+                  <Text
+                    key={id}
+                    style={[styles.value, { width: columnWidths[id] }]}
+                  >
+                    {formatStat(row.category, id, calculate(row))}
+                  </Text>
+                ))}
               </View>
             ))}
           </ScrollView>

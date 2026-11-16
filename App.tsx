@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { StatusBar } from 'expo-status-bar';
 import { ChevronLeft, ChevronRight, Settings } from 'lucide-react-native';
 import {
-  startTransition,
   useEffect,
   useMemo,
   useRef,
@@ -9,37 +9,23 @@ import {
   type SetStateAction,
 } from 'react';
 import {
-  Button,
   Alert,
   Pressable,
-  StyleSheet,
+  ScrollView,
   Text,
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
-import {
-  Gesture,
-  GestureDetector,
-  GestureHandlerRootView,
-} from 'react-native-gesture-handler';
-import Animated, {
-  clamp,
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
-import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
-import type { KeyboardAwareScrollViewRef } from 'react-native-keyboard-controller';
-import { KeyboardProvider } from './src/components/KeyboardProvider';
+import Animated from 'react-native-reanimated';
+import { GestureDetector } from 'react-native-gesture-handler';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { CategoryEditor } from './src/components/CategoryEditor';
-import { CarryoverTimerSection } from './src/components/CarryoverTimerSection';
+import { KeyboardProvider } from './src/components/KeyboardProvider';
 import { CategoryInputCard } from './src/components/CategoryInputCard';
-import { ChartsPanel } from './src/components/ChartsPanel';
-import { CorrelationPanel } from './src/components/CorrelationPanel';
-import { TopCorrelationsPanel } from './src/components/TopCorrelationsPanel';
-import { SummaryPanel } from './src/components/SummaryPanel';
+import { CarryoverTimerSection } from './src/components/CarryoverTimerSection';
+import { ConfirmDialog } from './src/components/ConfirmDialog';
+import { DailyEntryPane } from './src/components/DailyEntryPane';
+import { StatsPanel } from './src/components/StatsPanel';
 import { Panel } from './src/components/Panel';
 import { InfoLink } from './src/components/InfoLink';
 import { StatisticsSettings } from './src/components/StatisticsSettings';
@@ -49,8 +35,14 @@ import { ImportDataModal } from './src/components/ImportDataModal';
 import {
   createDefaultCategory,
   getNextCategoryNameSequence,
+  recomputeVirtualSeries,
 } from './src/lib/category';
-import { createDefaultGroup, normalizeGroups } from './src/lib/groups';
+import {
+  createDefaultGroup,
+  isGroupEnabled,
+  normalizeGroups,
+  setGroupEnabled,
+} from './src/lib/groups';
 import {
   getLocalDateKey,
   getLocalTimeStamp,
@@ -60,17 +52,19 @@ import {
   findCarryoverTimers,
   getOldestRunningTimerByCategory,
 } from './src/lib/durationTimers';
-import { createCorrelationInputHash } from './src/lib/hash';
-import { createBuiltInTestDataset } from './src/lib/testDataset';
-import { createVirtualCorrelationInput } from './src/lib/virtualSeries';
 import {
   persistentStatePrefix,
   usePersistentState,
 } from './src/hooks/usePersistentState';
+import { useNotificationSync } from './src/hooks/useNotificationSync';
+import {
+  correlationCachePrefix,
+  useCorrelationRows,
+} from './src/hooks/useCorrelationRows';
+import { useSwipePager } from './src/hooks/useSwipePager';
 import { WorkspacePicker } from './src/components/WorkspacePicker';
 import { WorkspaceManagerModal } from './src/components/WorkspaceManagerModal';
 import { DatePickerModal } from './src/components/DatePickerModal';
-import { SystemScreen } from './src/components/SystemScreen';
 import { confirmAction } from './src/lib/confirm';
 import {
   createWorkspaceId,
@@ -79,26 +73,18 @@ import {
   visibleWorkspaces,
 } from './src/lib/workspaces';
 import { colors } from './src/theme/tokens';
+import { styles } from './src/appStyles';
 import type {
   CategoryDefinition,
   CategorySelectionRecord,
   CategoryGroup,
 } from './src/types/category';
 import type { WorkspaceMeta } from './src/types/workspace';
-import type {
-  CorrelationCacheEntry,
-  CorrelationRow,
-} from './src/types/correlation';
+import type { ChartSelection } from './src/types/charts';
 import {
   createDefaultStatisticsSettings,
-  isStatisticEnabled,
   type StatisticsSettings as StatisticsSettingsState,
 } from './src/lib/statistics';
-import { runCorrelation } from './src/workers/correlationRunner';
-import {
-  calculateWeeklyEffects,
-  type WeeklyEffectResult,
-} from './src/lib/weeklyEffects';
 import type {
   GlobalTransferSnapshot,
   ImportPlan,
@@ -107,9 +93,6 @@ import type {
 
 const createOffsets = (maximum: number): number[] =>
   Array.from({ length: maximum + 1 }, (_, index) => index);
-const cachePrefix = 'correlation.mobile.v5.cache.';
-const correlationPublishIntervalMs = 120;
-type MobilePage = 'daily' | 'stats';
 
 const initialCategories = (): CategoryDefinition[] => [
   createDefaultCategory('multiple-choice', 0, 'Mood', 1),
@@ -126,58 +109,35 @@ const App = () => {
   const [importOpen, setImportOpen] = useState(false);
   const [workspaceManagerOpen, setWorkspaceManagerOpen] = useState(false);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
-  const [page, setPage] = useState<MobilePage>('daily');
-  // Stats panel is deferred one frame past initial mount on mobile so Daily paints first;
-  // both panels stay mounted afterward to support full drag-following swipe.
-  const [statsMounted, setStatsMounted] = useState(desktop);
-  useEffect(() => {
-    if (statsMounted) return undefined;
-    const frame = requestAnimationFrame(() => setStatsMounted(true));
-    return () => cancelAnimationFrame(frame);
-  }, [statsMounted]);
-  // 0 = Daily fully shown, -width = Stats fully shown; gesture drives this directly on the UI thread.
-  const pageTranslate = useSharedValue(0);
-  useEffect(() => {
-    pageTranslate.value = withTiming(page === 'daily' ? 0 : -width, {
-      duration: 220,
-    });
-  }, [page, width, pageTranslate]);
-  // Horizontal-only pan: activeOffsetX lets it win over vertical scroll gestures on the ScrollView.
-  const swipeGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .activeOffsetX([-20, 20])
-        .failOffsetY([-15, 15])
-        .onUpdate((event) => {
-          if (desktop) return;
-          const base = page === 'daily' ? 0 : -width;
-          pageTranslate.value = clamp(base + event.translationX, -width, 0);
-        })
-        .onEnd((event) => {
-          if (desktop) return;
-          const shouldSwitch =
-            Math.abs(event.translationX) > width * 0.3 ||
-            Math.abs(event.velocityX) > 800;
-          const draggingToStats = pageTranslate.value < -width / 2;
-          const next = shouldSwitch
-            ? draggingToStats
-              ? 'stats'
-              : 'daily'
-            : page;
-          pageTranslate.value = withTiming(next === 'daily' ? 0 : -width, {
-            duration: 220,
-          });
-          if (next !== page) runOnJS(setPage)(next);
-        }),
-    [desktop, page, width, pageTranslate],
-  );
-  const pagerStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: pageTranslate.value }],
-  }));
+  const { page, setPage, statsMounted, swipeGesture, pagerStyle } =
+    useSwipePager(desktop, width);
   const [statsRenderStage, setStatsRenderStage] = useState(0);
   const [selectedDate, setSelectedDate] = useState(() => new Date());
-  const [selectedCategoryId, setSelectedCategoryId] = useState('');
-  const [selectedGroupId, setSelectedGroupId] = useState('default-group');
+  const [editorSelection, setEditorSelection] = useState<
+    { kind: 'category' | 'group'; id: string } | undefined
+  >({ kind: 'group', id: 'default-group' });
+  const selectedCategoryId =
+    editorSelection?.kind === 'category' ? editorSelection.id : '';
+  const selectedGroupId =
+    editorSelection?.kind === 'group' ? editorSelection.id : '';
+  const setSelectedCategoryId = (updater: SetStateAction<string>) =>
+    setEditorSelection((current) => {
+      const previous = current?.kind === 'category' ? current.id : '';
+      const id = typeof updater === 'function' ? updater(previous) : updater;
+      return id
+        ? { kind: 'category', id }
+        : current?.kind === 'category'
+          ? undefined
+          : current;
+    });
+  const setSelectedGroupId = (id: string) =>
+    setEditorSelection((current) =>
+      id
+        ? { kind: 'group', id }
+        : current?.kind === 'group'
+          ? undefined
+          : current,
+    );
   const [workspaceList, setWorkspaceList, workspaceListHydrated] =
     usePersistentState<WorkspaceMeta[]>('workspaces.v1', []);
   const [
@@ -202,6 +162,11 @@ const App = () => {
   >('recordsByWorkspace.v1', {});
   const [activeWorkspaceId, setActiveWorkspaceId, activeWorkspaceIdHydrated] =
     usePersistentState<string>('activeWorkspaceId.v1', 'user');
+  const [chartSelections, setChartSelections, chartSelectionsHydrated] =
+    usePersistentState<Record<string, ChartSelection>>(
+      'chart.selectionByWorkspace.v1',
+      {},
+    );
   const [migrated, setMigrated] = useState(false);
   const migrationChecked = useRef(false);
   const [correlationOffset, setCorrelationOffset, correlationOffsetHydrated] =
@@ -221,10 +186,6 @@ const App = () => {
     'statistics.settings.v2',
     createDefaultStatisticsSettings,
   );
-  const [rows, setRows] = useState<CorrelationRow[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [weeklyEffects, setWeeklyEffects] = useState<WeeklyEffectResult[]>([]);
-  const testDatasetMigrationChecked = useRef(false);
 
   const hydrated =
     workspaceListHydrated &&
@@ -280,32 +241,38 @@ const App = () => {
   const categories = useMemo(
     () =>
       (categoriesByWorkspace[activeWorkspaceId] ?? []).map(
-        (category, index, source) => ({
-          ...category,
-          nameSequence:
-            category.nameSequence ??
-            source
-              .slice(0, index + 1)
-              .filter((candidate) => candidate.kind === category.kind).length,
-          ...(category.kind === 'duration'
-            ? {
-                duration: {
-                  ...category.duration,
-                  resetEnabled: category.duration.resetEnabled ?? true,
-                  cumulative: category.duration.cumulative ?? false,
-                  animate: category.duration.animate ?? true,
-                },
-              }
-            : {}),
-          enabled: category.enabled ?? true,
-          notesEnabled: category.notesEnabled ?? false,
-          sentimentEnabled: category.sentimentEnabled ?? false,
-          correlateWithinGroup: category.correlateWithinGroup ?? false,
-          allowMultiplePerDay: category.allowMultiplePerDay ?? false,
-          mainAggregation: category.mainAggregation ?? 'mean',
-          virtualSeries: category.virtualSeries ?? [],
-        }),
-      ) as CategoryDefinition[],
+        (category, index, source) => {
+          const normalized = {
+            ...category,
+            nameSequence:
+              category.nameSequence ??
+              source
+                .slice(0, index + 1)
+                .filter((candidate) => candidate.kind === category.kind)
+                .length,
+            ...(category.kind === 'duration'
+              ? {
+                  duration: {
+                    ...category.duration,
+                    resetEnabled: category.duration.resetEnabled ?? true,
+                    cumulative: category.duration.cumulative ?? false,
+                    animate: category.duration.animate ?? true,
+                  },
+                }
+              : {}),
+            enabled: category.enabled ?? true,
+            notesEnabled: category.notesEnabled ?? false,
+            sentimentEnabled: category.sentimentEnabled ?? false,
+            correlateWithinGroup: category.correlateWithinGroup ?? false,
+            allowMultiplePerDay: category.allowMultiplePerDay ?? false,
+            virtualSeries: category.virtualSeries ?? [],
+          } as CategoryDefinition;
+          return {
+            ...normalized,
+            virtualSeries: recomputeVirtualSeries(normalized),
+          };
+        },
+      ),
     [activeWorkspaceId, categoriesByWorkspace],
   );
   const groups = useMemo(
@@ -313,35 +280,32 @@ const App = () => {
     [activeWorkspaceId, categories, groupsByWorkspace],
   );
   const records = recordsByWorkspace[activeWorkspaceId] ?? {};
+  const entryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const record of Object.values(records))
+      counts[record.categoryId] = (counts[record.categoryId] ?? 0) + 1;
+    return counts;
+  }, [records]);
   const enabledCategories = useMemo(
     () => categories.filter((category) => category.enabled),
     [categories],
   );
+  // normalizeGroups assigns every category to a group, so no "ungrouped" section is needed.
   const dailySections = useMemo(() => {
     const byId = new Map(
       enabledCategories.map((category) => [category.id, category]),
     );
-    const grouped = groups.map((group) => ({
-      id: group.id,
-      name: group.name,
-      categories: group.categoryIds
-        .map((id) => byId.get(id))
-        .filter((category): category is CategoryDefinition =>
-          Boolean(category),
-        ),
-    }));
-    const assigned = new Set(
-      grouped.flatMap((group) => group.categories.map((c) => c.id)),
-    );
-    const ungrouped = enabledCategories.filter(
-      (category) => !assigned.has(category.id),
-    );
-    return [
-      ...grouped,
-      ...(ungrouped.length
-        ? [{ id: 'ungrouped', name: 'Ungrouped', categories: ungrouped }]
-        : []),
-    ].filter((group) => group.categories.length > 0);
+    return groups
+      .map((group) => ({
+        id: group.id,
+        name: group.name,
+        categories: group.categoryIds
+          .map((id) => byId.get(id))
+          .filter((category): category is CategoryDefinition =>
+            Boolean(category),
+          ),
+      }))
+      .filter((group) => group.categories.length > 0);
   }, [enabledCategories, groups]);
   const correlationCategories = useMemo(() => {
     const byId = new Map(
@@ -360,31 +324,16 @@ const App = () => {
       ...enabledCategories.filter((category) => !included.has(category.id)),
     ];
   }, [enabledCategories, groups]);
-  // Correlation results are cached independently of category order, so display
-  // order is re-applied here. Virtual-series ids are `${categoryId}:...` and
-  // category ids never contain a colon.
-  const orderedRows = useMemo(() => {
-    const order = new Map(
-      correlationCategories.map((category, index) => [category.id, index]),
-    );
-    const rank = (seriesId: string) =>
-      order.get(seriesId.split(':')[0]) ?? Number.MAX_SAFE_INTEGER;
-    return [...rows].sort((left, right) => {
-      const leftPair = [
-        rank(left.leftCategoryId),
-        rank(left.rightCategoryId),
-      ].sort((first, second) => first - second);
-      const rightPair = [
-        rank(right.leftCategoryId),
-        rank(right.rightCategoryId),
-      ].sort((first, second) => first - second);
-      return (
-        leftPair[0] - rightPair[0] ||
-        leftPair[1] - rightPair[1] ||
-        rank(left.leftCategoryId) - rank(right.leftCategoryId)
-      );
-    });
-  }, [correlationCategories, rows]);
+  const { orderedRows, loading } = useCorrelationRows({
+    activeWorkspaceId,
+    correlationCategories,
+    groups,
+    hydrated,
+    offsets,
+    records,
+    statisticsSettings,
+    statsVisible,
+  });
   const [collapsedDailyGroups, setCollapsedDailyGroups] = useState<
     Record<string, boolean>
   >({});
@@ -392,12 +341,14 @@ const App = () => {
     usePersistentState<boolean>('daily.categoryIndexExpanded.v1', true);
   const transferWorkspaces = useMemo<WorkspaceTransferSnapshot[]>(
     () =>
-      workspaceList.map((workspace) => ({
-        ...normalizeWorkspace(workspace),
-        categories: categoriesByWorkspace[workspace.id] ?? [],
-        groups: groupsByWorkspace[workspace.id] ?? [],
-        records: recordsByWorkspace[workspace.id] ?? {},
-      })),
+      workspaceList
+        .filter((workspace) => workspace.id !== 'test')
+        .map((workspace) => ({
+          ...normalizeWorkspace(workspace),
+          categories: categoriesByWorkspace[workspace.id] ?? [],
+          groups: groupsByWorkspace[workspace.id] ?? [],
+          records: recordsByWorkspace[workspace.id] ?? {},
+        })),
     [
       categoriesByWorkspace,
       groupsByWorkspace,
@@ -424,7 +375,7 @@ const App = () => {
       statisticsSettings,
     ],
   );
-  const scrollRef = useRef<KeyboardAwareScrollViewRef>(null);
+  const scrollRef = useRef<ScrollView>(null);
   const scrollOffset = useRef(0);
   const categoryAnchors = useRef<Record<string, View | null>>({});
   const scrollToCategory = (categoryId: string) => {
@@ -456,6 +407,19 @@ const App = () => {
     () => getOldestRunningTimerByCategory(records),
     [records],
   );
+  useNotificationSync({
+    hydrated,
+    categoriesByWorkspace,
+    recordsByWorkspace,
+    setRecordsByWorkspace,
+    setActiveWorkspaceId,
+    setSelectedDate,
+    setSelectedCategoryId,
+    setPage,
+    scrollToCategory,
+    activeWorkspaceId,
+    selectedDateKey,
+  });
 
   const applyUpdater = <T,>(updater: SetStateAction<T>, current: T): T =>
     typeof updater === 'function'
@@ -489,7 +453,10 @@ const App = () => {
     }));
 
   const workspaces = useMemo(
-    () => workspaceList.map(normalizeWorkspace),
+    () =>
+      workspaceList
+        .filter((workspace) => workspace.id !== 'test')
+        .map(normalizeWorkspace),
     [workspaceList],
   );
   const pickableWorkspaces = useMemo(
@@ -502,9 +469,24 @@ const App = () => {
   const addWorkspace = (name: string, notes: string) => {
     const id = createWorkspaceId(
       name,
-      workspaces.map((workspace) => workspace.id),
+      workspaceList.map((workspace) => workspace.id),
     );
-    const seedCategories = initialCategories();
+    let dataset: import('./src/lib/testDataset').TestDataset | undefined;
+    if (__DEV__) {
+      const { createTestWorkspaceDataset } =
+        require('./src/lib/testDataset') as typeof import('./src/lib/testDataset');
+      dataset = createTestWorkspaceDataset(
+        name,
+        categoriesByWorkspace.test
+          ? {
+              categories: categoriesByWorkspace.test,
+              groups: groupsByWorkspace.test,
+              records: recordsByWorkspace.test ?? {},
+            }
+          : undefined,
+      );
+    }
+    const seedCategories = dataset?.categories ?? initialCategories();
     setWorkspaceList((current) => [
       ...current,
       { id, name, notes, hidden: false },
@@ -515,9 +497,12 @@ const App = () => {
     }));
     setGroupsByWorkspace((current) => ({
       ...current,
-      [id]: [createDefaultGroup(seedCategories)],
+      [id]: dataset?.groups ?? [createDefaultGroup(seedCategories)],
     }));
-    setRecordsByWorkspace((current) => ({ ...current, [id]: {} }));
+    setRecordsByWorkspace((current) => ({
+      ...current,
+      [id]: dataset?.records ?? {},
+    }));
     setActiveWorkspaceId(id);
   };
   const updateWorkspace = (id: string, patch: Partial<WorkspaceMeta>) =>
@@ -527,7 +512,14 @@ const App = () => {
       ),
     );
   const reorderWorkspaces = (from: number, to: number) =>
-    setWorkspaceList((current) => moveWorkspace(current, from, to));
+    setWorkspaceList((current) => [
+      ...moveWorkspace(
+        current.filter((workspace) => workspace.id !== 'test'),
+        from,
+        to,
+      ),
+      ...current.filter((workspace) => workspace.id === 'test'),
+    ]);
   const deleteWorkspace = (id: string) => {
     const workspace = workspaces.find((candidate) => candidate.id === id);
     if (!workspace || workspaces.length < 2) return;
@@ -547,7 +539,7 @@ const App = () => {
         setCategoriesByWorkspace(drop);
         setGroupsByWorkspace(drop);
         setRecordsByWorkspace(drop);
-        AsyncStorage.removeItem(`${cachePrefix}${id}`).catch(() => undefined);
+        AsyncStorage.removeItem(`${correlationCachePrefix}${id}`).catch(() => undefined);
       },
     );
   };
@@ -570,11 +562,19 @@ const App = () => {
 
   useEffect(() => {
     if (
-      !selectedCategoryId ||
+      selectedCategoryId &&
       !categories.some((category) => category.id === selectedCategoryId)
     )
-      setSelectedCategoryId(categories[0]?.id ?? '');
+      setSelectedCategoryId('');
   }, [categories, selectedCategoryId]);
+
+  useEffect(() => {
+    if (
+      selectedGroupId &&
+      !groups.some((group) => group.id === selectedGroupId)
+    )
+      setSelectedGroupId('');
+  }, [groups, selectedGroupId]);
 
   // One-time migration from the old fixed user/test storage keys into the
   // dynamic per-workspace maps; skipped once a workspace list already exists.
@@ -613,32 +613,36 @@ const App = () => {
         (await readLegacy<Record<string, CategorySelectionRecord>>(
           'records.v4',
         )) ?? {};
-      const testDataset = createBuiltInTestDataset();
-      const legacyTestCategories =
-        (await readLegacy<CategoryDefinition[]>('testCategories.v10')) ??
-        testDataset.categories;
+      const legacyTestCategories = await readLegacy<CategoryDefinition[]>(
+        'testCategories.v10',
+      );
       const legacyTestGroups = (await readLegacy<CategoryGroup[]>(
         'testGroups.v4',
-      )) ?? [createDefaultGroup(legacyTestCategories)];
+      )) ?? [createDefaultGroup(legacyTestCategories ?? [])];
       const legacyTestRecords =
         (await readLegacy<Record<string, CategorySelectionRecord>>(
           'testRecords.v10',
-        )) ?? testDataset.records;
+        )) ?? {};
+      const hasLegacyTestData =
+        legacyTestCategories !== null ||
+        Object.keys(legacyTestRecords).length > 0;
       setWorkspaceList([
         { id: 'user', name: 'User', notes: '', hidden: false },
-        { id: 'test', name: 'Test', notes: '', hidden: false },
+        ...(hasLegacyTestData
+          ? [{ id: 'test', name: 'Test', notes: '', hidden: true }]
+          : []),
       ]);
       setCategoriesByWorkspace({
         user: legacyUserCategories,
-        test: legacyTestCategories,
+        ...(hasLegacyTestData ? { test: legacyTestCategories ?? [] } : {}),
       });
       setGroupsByWorkspace({
         user: legacyUserGroups,
-        test: legacyTestGroups,
+        ...(hasLegacyTestData ? { test: legacyTestGroups } : {}),
       });
       setRecordsByWorkspace({
         user: legacyUserRecords,
-        test: legacyTestRecords,
+        ...(hasLegacyTestData ? { test: legacyTestRecords } : {}),
       });
       setMigrated(true);
     })();
@@ -654,242 +658,11 @@ const App = () => {
     workspaceListHydrated,
   ]);
 
-  useEffect(() => {
-    if (!migrated || testDatasetMigrationChecked.current) return;
-    testDatasetMigrationChecked.current = true;
-    if ((categoriesByWorkspace.test ?? []).length === 25) return;
-
-    const testDataset = createBuiltInTestDataset();
-    setCategoriesByWorkspace((current) => ({
-      ...current,
-      test: testDataset.categories,
-    }));
-    setRecordsByWorkspace((current) => ({
-      ...current,
-      test: testDataset.records,
-    }));
-  }, [
-    categoriesByWorkspace.test,
-    migrated,
-    setCategoriesByWorkspace,
-    setRecordsByWorkspace,
-  ]);
-
-  useEffect(() => {
-    if (!hydrated || !statsVisible) {
-      setLoading(false);
-      return;
-    }
-    if (
-      !isStatisticEnabled(statisticsSettings, 'correlation.section') &&
-      !isStatisticEnabled(statisticsSettings, 'correlation.top-matches')
-    ) {
-      setRows([]);
-      setLoading(false);
-      return;
-    }
-    const includeCalendar = isStatisticEnabled(
-      statisticsSettings,
-      'calendar.section',
-    );
-    const inputHash = createCorrelationInputHash(
-      correlationCategories,
-      records,
-      offsets,
-      includeCalendar,
-      groups,
-    );
-    const cacheKey = `${cachePrefix}${activeWorkspaceId}`;
-    let active = true;
-    let correlationTask: ReturnType<typeof runCorrelation> | null = null;
-    let publicationTimer: ReturnType<typeof setTimeout> | null = null;
-    setLoading(true);
-    AsyncStorage.getItem(cacheKey)
-      .then((raw) => {
-        if (!active) return null;
-        const cached = raw ? (JSON.parse(raw) as CorrelationCacheEntry) : null;
-        if (cached?.inputHash === inputHash) return cached.rows;
-        const request = createVirtualCorrelationInput(
-          correlationCategories,
-          records,
-          offsets,
-          includeCalendar,
-          groups,
-        );
-        setRows([]);
-        const categoryById = new Map(
-          request.categories.map((category, index) => [
-            category.id,
-            { category, index },
-          ]),
-        );
-        const accumulatedRows = new Map<
-          string,
-          {
-            row: Omit<CorrelationRow, 'cells'>;
-            cellsByOffset: Map<number, CorrelationRow['cells'][number]>;
-          }
-        >();
-        const publishAccumulatedRows = () => {
-          publicationTimer = null;
-          if (!active) return;
-          const nextRows = [...accumulatedRows.values()]
-            .sort((first, second) => {
-              const firstLeft = categoryById.get(
-                first.row.leftCategoryId,
-              )!.index;
-              const firstRight = categoryById.get(
-                first.row.rightCategoryId,
-              )!.index;
-              const secondLeft = categoryById.get(
-                second.row.leftCategoryId,
-              )!.index;
-              const secondRight = categoryById.get(
-                second.row.rightCategoryId,
-              )!.index;
-              const firstPair = [
-                Math.min(firstLeft, firstRight),
-                Math.max(firstLeft, firstRight),
-              ];
-              const secondPair = [
-                Math.min(secondLeft, secondRight),
-                Math.max(secondLeft, secondRight),
-              ];
-              return (
-                firstPair[0] - secondPair[0] ||
-                firstPair[1] - secondPair[1] ||
-                firstLeft - secondLeft
-              );
-            })
-            .map(({ row, cellsByOffset }) => ({
-              ...row,
-              cells: [...cellsByOffset.values()].sort(
-                (first, second) => first.offset - second.offset,
-              ),
-            }));
-          startTransition(() => setRows(nextRows));
-        };
-        correlationTask = runCorrelation(request, (batch) => {
-          if (!active) return;
-          for (const cell of batch.cells) {
-            const left = categoryById.get(cell.leftCategoryId)?.category;
-            const right = categoryById.get(cell.rightCategoryId)?.category;
-            if (!left || !right) continue;
-            const key = `${left.id}:${right.id}`;
-            const accumulated = accumulatedRows.get(key) ?? {
-              row: {
-                label: `${left.name} x ${right.name}`,
-                leftCategoryId: left.id,
-                rightCategoryId: right.id,
-              },
-              cellsByOffset: new Map(),
-            };
-            accumulated.cellsByOffset.set(cell.offset, {
-              offset: cell.offset,
-              value: cell.value,
-            });
-            accumulatedRows.set(key, accumulated);
-          }
-          if (!publicationTimer)
-            publicationTimer = setTimeout(
-              publishAccumulatedRows,
-              correlationPublishIntervalMs,
-            );
-        });
-        return correlationTask.promise.then((nextRows) => {
-          if (!active) return null;
-          if (publicationTimer) {
-            clearTimeout(publicationTimer);
-            publicationTimer = null;
-          }
-          const entry: CorrelationCacheEntry = {
-            inputHash,
-            rows: nextRows,
-            updatedAt: new Date().toISOString(),
-          };
-          return AsyncStorage.setItem(cacheKey, JSON.stringify(entry)).then(
-            () => nextRows,
-          );
-        });
-      })
-      .then((nextRows) => {
-        if (active && nextRows) setRows(nextRows);
-      })
-      .catch(() => {
-        if (active) setRows([]);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-      if (publicationTimer) clearTimeout(publicationTimer);
-      correlationTask?.cancel();
-    };
-  }, [
-    activeWorkspaceId,
-    correlationCategories,
-    groups,
-    hydrated,
-    offsets,
-    records,
-    statisticsSettings,
-    statsVisible,
-  ]);
-
-  useEffect(() => {
-    const needsWeeklyEffects =
-      isStatisticEnabled(statisticsSettings, 'weekly.section') ||
-      isStatisticEnabled(statisticsSettings, 'summary.weekly-effect') ||
-      isStatisticEnabled(statisticsSettings, 'summary.weekly-phase') ||
-      isStatisticEnabled(statisticsSettings, 'summary.weekly-offset');
-    if (!hydrated || !statsVisible || !needsWeeklyEffects) {
-      setWeeklyEffects([]);
-      return;
-    }
-    setWeeklyEffects(
-      calculateWeeklyEffects(enabledCategories, records, offsets),
-    );
-  }, [
-    enabledCategories,
-    hydrated,
-    offsets,
-    records,
-    statisticsSettings,
-    statsVisible,
-  ]);
-
   const changeDay = (offset: number) =>
     setSelectedDate((current) => {
       const next = new Date(current);
       next.setDate(next.getDate() + offset);
       return next;
-    });
-  const updateValue = (categoryId: string, value: number) => {
-    const key = makeRecordKey(selectedDateKey, 0, categoryId);
-    setRecords((current) => ({
-      ...current,
-      [key]: {
-        key,
-        categoryId,
-        dateKey: selectedDateKey,
-        ordinal: 0,
-        localTime: getLocalTimeStamp(),
-        value,
-      },
-    }));
-  };
-  const addCategory = (kind: CategoryDefinition['kind']) =>
-    setCategories((current) => {
-      const sequence = getNextCategoryNameSequence(current, kind);
-      const category = createDefaultCategory(
-        kind,
-        current.length,
-        undefined,
-        sequence,
-      );
-      setSelectedCategoryId(category.id);
-      return [...current, category];
     });
   const addCategoryToGroup = (groupId: string) => {
     const sequence = getNextCategoryNameSequence(categories, 'multiple-choice');
@@ -928,6 +701,17 @@ const App = () => {
     setGroups((current) =>
       current.map((group) => (group.id === nextGroup.id ? nextGroup : group)),
     );
+  const toggleGroupEnabled = (groupId: string, enabled: boolean) => {
+    const group = groups.find((candidate) => candidate.id === groupId);
+    if (!group) return;
+    const next = setGroupEnabled(group, categories, enabled);
+    setGroups((current) =>
+      current.map((candidate) =>
+        candidate.id === groupId ? next.group : candidate,
+      ),
+    );
+    setCategories(next.categories);
+  };
   const restoreDefaults = () => {
     if (activeWorkspaceId !== 'user') return;
     const defaultCategories = initialCategories();
@@ -1137,15 +921,21 @@ const App = () => {
     categoryId: string,
     targetGroupId: string,
     targetIndex: number,
-  ) =>
+  ) => {
+    const target = groups.find((group) => group.id === targetGroupId);
+    if (!target || !isGroupEnabled(target)) return;
     setGroups((current) =>
       current.map((group) => {
         const without = group.categoryIds.filter((id) => id !== categoryId);
+        const suspendedCategoryIds = group.suspendedCategoryIds?.filter(
+          (id) => id !== categoryId,
+        );
         if (group.id !== targetGroupId)
-          return { ...group, categoryIds: without };
+          return { ...group, categoryIds: without, suspendedCategoryIds };
         const insertAt = Math.max(0, Math.min(targetIndex, without.length));
         return {
           ...group,
+          suspendedCategoryIds,
           categoryIds: [
             ...without.slice(0, insertAt),
             categoryId,
@@ -1154,19 +944,10 @@ const App = () => {
         };
       }),
     );
+  };
 
   const dailyPanel = (
-    <View style={styles.dailyPage}>
-      {!desktop ? (
-        <Pressable
-          accessibilityLabel="Open category editor"
-          accessibilityRole="button"
-          onPress={() => setEditorOpen(true)}
-          style={styles.dailyEditButton}
-        >
-          <Text style={styles.dailyEditButtonText}>Edit categories</Text>
-        </Pressable>
-      ) : null}
+    <DailyEntryPane onEditCategories={() => setEditorOpen(true)}>
       <CarryoverTimerSection
         records={carryoverTimers}
         categories={categories}
@@ -1225,9 +1006,7 @@ const App = () => {
                   }
                   style={styles.dailyGroupHeader}
                 >
-                  <Text style={styles.dailyGroupTitleLarge}>
-                    {section.name}
-                  </Text>
+                  <Text style={styles.dailyGroupTitle}>{section.name}</Text>
                   <Text style={styles.dailyGroupChevron}>
                     {expanded ? '\u2212' : '+'}
                   </Text>
@@ -1263,222 +1042,116 @@ const App = () => {
           </Text>
         )}
       </Panel>
-    </View>
+    </DailyEntryPane>
   );
   const statisticsPanel = (
-    <View style={styles.statistics}>
-      <View style={styles.statisticsHeader}>
-        <Text style={styles.statisticsTitle}>Statistics</Text>
-        <Button
-          title="Settings"
-          onPress={() => setStatisticsSettingsOpen(true)}
-        />
-      </View>
-      {statsRenderStage >= 1 &&
-      isStatisticEnabled(statisticsSettings, 'chart.section') ? (
-        <ChartsPanel categories={enabledCategories} records={records} />
-      ) : null}
-      {statsRenderStage >= 2 &&
-      isStatisticEnabled(statisticsSettings, 'chart.section') &&
-      isStatisticEnabled(statisticsSettings, 'correlation.section') ? (
-        <View style={styles.sectionGap} />
-      ) : null}
-      {statsRenderStage >= 2 &&
-      isStatisticEnabled(statisticsSettings, 'summary.section') ? (
-        <SummaryPanel
-          categories={enabledCategories}
-          records={records}
-          recentDays={safeSummaryLookback}
-          settings={statisticsSettings}
-          weeklyEffects={weeklyEffects}
-        />
-      ) : null}
-      {statsRenderStage >= 3 &&
-      isStatisticEnabled(statisticsSettings, 'summary.section') &&
-      isStatisticEnabled(statisticsSettings, 'correlation.section') ? (
-        <View style={styles.sectionGap} />
-      ) : null}
-      {statsRenderStage >= 3 &&
-      isStatisticEnabled(statisticsSettings, 'weekly.section') &&
-      weeklyEffects.length ? (
-        <Panel
-          title="Weekly effects"
-          subtitle="Cyclic weekday alignment after forward offsets."
-          infoSection="weekly-effects"
-        >
-          {weeklyEffects.map((effect) => (
-            <View key={effect.categoryId} style={styles.weeklyRow}>
-              <Text style={styles.weeklyName}>{effect.categoryName}</Text>
-              <Text style={styles.weeklyValue}>
-                {effect.score === null
-                  ? '--'
-                  : `${(effect.score * 100).toFixed(0)}%`}
-              </Text>
-              <Text style={styles.weeklyMeta}>
-                {effect.weekday === null
-                  ? 'No phase'
-                  : `Weekday ${effect.weekday}`}{' '}
-                · {effect.offset === null ? '--' : `+${effect.offset}d`}
-              </Text>
-            </View>
-          ))}
-        </Panel>
-      ) : null}
-      {statsRenderStage >= 4 &&
-      isStatisticEnabled(statisticsSettings, 'correlation.top-matches') ? (
-        <TopCorrelationsPanel
-          rows={orderedRows}
-          threshold={safeTopCorrelationThreshold}
-          onThresholdChange={setTopCorrelationThreshold}
-        />
-      ) : null}
-      {statsRenderStage >= 5 &&
-      isStatisticEnabled(statisticsSettings, 'correlation.top-matches') &&
-      isStatisticEnabled(statisticsSettings, 'correlation.section') ? (
-        <View style={styles.sectionGap} />
-      ) : null}
-      {statsRenderStage >= 5 &&
-      isStatisticEnabled(statisticsSettings, 'correlation.section') ? (
-        <CorrelationPanel
-          rows={orderedRows}
-          loading={loading}
-          offsets={offsets}
-          offset={safeCorrelationOffset}
-          onOffsetChange={(value) =>
-            setCorrelationOffset(Math.min(366, Math.max(0, Math.round(value))))
-          }
-        />
-      ) : null}
-      {!isStatisticEnabled(statisticsSettings, 'chart.section') &&
-      !isStatisticEnabled(statisticsSettings, 'summary.section') &&
-      !isStatisticEnabled(statisticsSettings, 'correlation.section') &&
-      !isStatisticEnabled(statisticsSettings, 'correlation.top-matches') ? (
-        <Panel
-          title="Statistics paused"
-          subtitle="Enable a statistics section to calculate and view results."
-          infoSection="statistics"
-        >
-          <Button
-            title="Open statistics settings"
-            onPress={() => setStatisticsSettingsOpen(true)}
-          />
-        </Panel>
-      ) : null}
-    </View>
-  );
-
-  const editCategoriesControl = (
-    <Pressable
-      accessibilityLabel="Open category editor"
-      accessibilityRole="button"
-      onPress={() => setEditorOpen(true)}
-      style={[styles.menuButton, !desktop && styles.menuButtonMobile]}
-    >
-      <Text style={[styles.menuText, !desktop && styles.menuTextMobile]}>
-        {desktop ? 'Edit categories' : 'Edit\ncategories'}
-      </Text>
-    </Pressable>
-  );
-  const dateNavigationControl = (
-    <View style={desktop ? styles.titleArea : styles.titleAreaMobile}>
-      <View style={styles.dateNavRow}>
-        <Pressable
-          accessibilityLabel="Previous day"
-          accessibilityRole="button"
-          onPress={() => changeDay(-1)}
-          style={[styles.dateNavButton, !desktop && styles.dateNavButtonMobile]}
-        >
-          <ChevronLeft color={colors.primary} size={20} />
-        </Pressable>
-        <Pressable
-          accessibilityLabel="Open date picker"
-          accessibilityRole="button"
-          onPress={() => setDatePickerOpen(true)}
-        >
-          <Text numberOfLines={1} style={styles.date}>
-            {selectedDateLabel}
-          </Text>
-        </Pressable>
-        <Pressable
-          accessibilityLabel="Next day"
-          accessibilityRole="button"
-          disabled={selectedDateKey === todayKey}
-          onPress={() => changeDay(1)}
-          style={[styles.dateNavButton, !desktop && styles.dateNavButtonMobile]}
-        >
-          <ChevronRight
-            color={selectedDateKey === todayKey ? '#a6b1c0' : colors.primary}
-            size={20}
-          />
-        </Pressable>
-      </View>
-      {selectedDateKey !== todayKey ? (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setSelectedDate(new Date())}
-          style={styles.jumpToTodayButton}
-        >
-          <Text style={styles.jumpToToday}>Jump to today</Text>
-        </Pressable>
-      ) : null}
-    </View>
-  );
-  const headerUtilityControls = (
-    <View style={styles.headerUtilities}>
-      <InfoLink
-        compact={!desktop}
-        section="categories"
-        label="Open category and tracker documentation"
-      />
-      <Pressable
-        accessibilityLabel="Open settings"
-        accessibilityRole="button"
-        onPress={() => setSettingsOpen(true)}
-        style={[styles.settingsButton, !desktop && styles.settingsButtonMobile]}
-      >
-        <Settings color={colors.primary} size={20} />
-      </Pressable>
-    </View>
+    <StatsPanel
+      statsRenderStage={statsRenderStage}
+      workspaceId={activeWorkspaceId}
+      chartSelection={chartSelections[activeWorkspaceId]}
+      chartSelectionHydrated={chartSelectionsHydrated}
+      onChartSelectionChange={(selection) => {
+        const workspaceId = activeWorkspaceId;
+        setChartSelections((current) => ({
+          ...current,
+          [workspaceId]: selection,
+        }));
+      }}
+      statisticsSettings={statisticsSettings}
+      enabledCategories={enabledCategories}
+      records={records}
+      safeSummaryLookback={safeSummaryLookback}
+      orderedRows={orderedRows}
+      loading={loading}
+      offsets={offsets}
+      safeCorrelationOffset={safeCorrelationOffset}
+      safeTopCorrelationThreshold={safeTopCorrelationThreshold}
+      setTopCorrelationThreshold={setTopCorrelationThreshold}
+      setCorrelationOffset={(value) =>
+        setCorrelationOffset(Math.min(366, Math.max(0, Math.round(value))))
+      }
+      setStatisticsSettingsOpen={setStatisticsSettingsOpen}
+    />
   );
 
   if (!hydrated)
     return (
       <SafeAreaProvider>
-        <SystemScreen backgroundColor="#eaf0f7" style={styles.loading}>
+        <SafeAreaView style={styles.loading}>
+          <StatusBar style="dark" />
           <Text style={styles.loadingText}>Loading your tracker...</Text>
-        </SystemScreen>
+        </SafeAreaView>
       </SafeAreaProvider>
     );
 
   return (
-    <GestureHandlerRootView style={styles.gestureRoot}>
-      <KeyboardProvider>
-        <SafeAreaProvider>
-          <SystemScreen backgroundColor="#eaf0f7" style={styles.root}>
-            <View style={styles.header}>
-              <View
-                style={[styles.headerTop, !desktop && styles.headerTopMobile]}
-              >
-                {desktop ? (
-                  <>
-                    <View style={styles.headerSide}>
-                      {editCategoriesControl}
-                    </View>
-                    {dateNavigationControl}
-                    <View style={[styles.headerSide, styles.headerSideRight]}>
-                      {headerUtilityControls}
-                    </View>
-                  </>
-                ) : (
-                  <View style={styles.mobileHeaderRow}>
-                    {dateNavigationControl}
-                    <View style={styles.mobileHeaderUtilities}>
-                      {headerUtilityControls}
-                    </View>
+    <KeyboardProvider>
+      <SafeAreaProvider>
+        <SafeAreaView style={styles.root}>
+          <StatusBar style="dark" />
+          <View style={styles.header}>
+            <View style={desktop && styles.desktopFrame}>
+              <View style={styles.headerTop}>
+                <View style={styles.headerSide} />
+                <View style={styles.titleArea}>
+                  <View style={styles.dateNavRow}>
+                    <Pressable
+                      accessibilityLabel="Previous day"
+                      accessibilityRole="button"
+                      onPress={() => changeDay(-1)}
+                      style={styles.dateNavButton}
+                    >
+                      <ChevronLeft color={colors.primary} size={20} />
+                    </Pressable>
+                    <Pressable
+                      accessibilityLabel="Open date picker"
+                      accessibilityRole="button"
+                      onPress={() => setDatePickerOpen(true)}
+                    >
+                      <Text style={styles.date}>{selectedDateLabel}</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityLabel="Next day"
+                      accessibilityRole="button"
+                      disabled={selectedDateKey === todayKey}
+                      onPress={() => changeDay(1)}
+                      style={styles.dateNavButton}
+                    >
+                      <ChevronRight
+                        color={
+                          selectedDateKey === todayKey
+                            ? '#a6b1c0'
+                            : colors.primary
+                        }
+                        size={20}
+                      />
+                    </Pressable>
                   </View>
-                )}
+                  {selectedDateKey !== todayKey ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => setSelectedDate(new Date())}
+                    >
+                      <Text style={styles.jumpToToday}>Jump to today</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+                <View style={[styles.headerSide, styles.headerSideRight]}>
+                  <InfoLink
+                    section="categories"
+                    label="Open category and tracker documentation"
+                  />
+                  <Pressable
+                    accessibilityLabel="Open settings"
+                    accessibilityRole="button"
+                    onPress={() => setSettingsOpen(true)}
+                    style={styles.settingsButton}
+                  >
+                    <Settings color={colors.primary} size={20} />
+                  </Pressable>
+                </View>
               </View>
-              <View style={[styles.modeRow, !desktop && styles.modeRowMobile]}>
+              <View style={styles.modeRow}>
                 <WorkspacePicker
                   options={pickableWorkspaces.map((workspace) => ({
                     id: workspace.id,
@@ -1495,151 +1168,139 @@ const App = () => {
                 </Text>
               ) : null}
             </View>
-            {!desktop ? (
-              <View style={styles.pageTabs}>
-                <PageTab
-                  label="Daily"
-                  active={page === 'daily'}
-                  onPress={() => setPage('daily')}
-                />
-                <PageTab
-                  label="Stats"
-                  active={page === 'stats'}
-                  onPress={() => setPage('stats')}
-                />
+          </View>
+          {!desktop ? (
+            <View style={styles.pageTabs}>
+              <PageTab
+                label="Daily"
+                active={page === 'daily'}
+                onPress={() => setPage('daily')}
+              />
+              <PageTab
+                label="Stats"
+                active={page === 'stats'}
+                onPress={() => setPage('stats')}
+              />
+            </View>
+          ) : null}
+          {!desktop ? (
+            <GestureDetector gesture={swipeGesture}>
+              <View style={styles.pagerViewport}>
+                <Animated.View
+                  style={[styles.pagerTrack, { width: width * 2 }, pagerStyle]}
+                >
+                  <View style={{ width }}>
+                    <ScrollView
+                      ref={scrollRef}
+                      contentContainerStyle={styles.content}
+                      onScroll={(event) => {
+                        scrollOffset.current =
+                          event.nativeEvent.contentOffset.y;
+                      }}
+                      scrollEventThrottle={16}
+                    >
+                      {dailyPanel}
+                    </ScrollView>
+                  </View>
+                  <View style={{ width }}>
+                    {statsMounted ? (
+                      <ScrollView contentContainerStyle={styles.content}>
+                        {statisticsPanel}
+                      </ScrollView>
+                    ) : null}
+                  </View>
+                </Animated.View>
               </View>
-            ) : null}
-            {!desktop ? (
-              <GestureDetector gesture={swipeGesture}>
-                <View style={styles.pagerViewport}>
-                  <Animated.View
-                    style={[
-                      styles.pagerTrack,
-                      { width: width * 2 },
-                      pagerStyle,
-                    ]}
-                  >
-                    <View style={{ width }}>
-                      <KeyboardAwareScrollView
-                        ref={scrollRef}
-                        bottomOffset={24}
-                        contentContainerStyle={styles.content}
-                        keyboardDismissMode="on-drag"
-                        onScroll={(event) => {
-                          scrollOffset.current =
-                            event.nativeEvent.contentOffset.y;
-                        }}
-                        scrollEventThrottle={16}
-                      >
-                        {dailyPanel}
-                      </KeyboardAwareScrollView>
-                    </View>
-                    <View style={{ width }}>
-                      {statsMounted ? (
-                        <KeyboardAwareScrollView
-                          bottomOffset={24}
-                          contentContainerStyle={styles.content}
-                          keyboardDismissMode="on-drag"
-                        >
-                          {statisticsPanel}
-                        </KeyboardAwareScrollView>
-                      ) : null}
-                    </View>
-                  </Animated.View>
-                </View>
-              </GestureDetector>
-            ) : (
-              <KeyboardAwareScrollView
-                ref={scrollRef}
-                bottomOffset={24}
-                contentContainerStyle={styles.content}
-                keyboardDismissMode="on-drag"
-                onScroll={(event) => {
-                  scrollOffset.current = event.nativeEvent.contentOffset.y;
-                }}
-                scrollEventThrottle={16}
-              >
-                <View style={styles.desktopGrid}>
-                  <View style={styles.column}>{dailyPanel}</View>
-                  <View style={styles.column}>{statisticsPanel}</View>
-                </View>
-              </KeyboardAwareScrollView>
-            )}
-            <CategoryEditor
-              visible={editorOpen}
-              categories={categories}
-              groups={groups}
-              selectedCategoryId={selectedCategoryId}
-              selectedGroupId={selectedGroupId}
-              onClose={() => setEditorOpen(false)}
-              onSelect={setSelectedCategoryId}
-              onAddGroup={addGroup}
-              onAddCategoryToGroup={addCategoryToGroup}
-              onRestoreDefaults={restoreDefaults}
-              onDeleteGroup={deleteGroup}
-              onDelete={deleteCategory}
-              onMoveCategory={moveCategory}
-              onUpdate={updateCategory}
-              onSelectGroup={(groupId) => {
-                setSelectedGroupId(groupId);
-                if (groupId) setSelectedCategoryId('');
+            </GestureDetector>
+          ) : (
+            <ScrollView
+              ref={scrollRef}
+              contentContainerStyle={styles.content}
+              onScroll={(event) => {
+                scrollOffset.current = event.nativeEvent.contentOffset.y;
               }}
-              onUpdateGroup={updateGroup}
-            />
-            <StatisticsSettings
-              visible={statisticsSettingsOpen}
-              settings={statisticsSettings}
-              onChange={setStatisticsSettings}
-              onOpenCategorySettings={() => {
-                setStatisticsSettingsOpen(false);
-                setEditorOpen(true);
-              }}
-              onClose={() => setStatisticsSettingsOpen(false)}
-            />
-            <SettingsDrawer
-              visible={settingsOpen}
-              onClose={() => setSettingsOpen(false)}
-              onExport={() => {
-                setSettingsOpen(false);
-                setExportOpen(true);
-              }}
-              onImport={() => {
-                setSettingsOpen(false);
-                setImportOpen(true);
-              }}
-            />
-            <ExportDataModal
-              visible={exportOpen}
-              workspaces={transferWorkspaces}
-              globals={transferGlobals}
-              onClose={() => setExportOpen(false)}
-            />
-            <ImportDataModal
-              visible={importOpen}
-              workspaces={transferWorkspaces}
-              globals={transferGlobals}
-              onApply={applyImportPlan}
-              onClose={() => setImportOpen(false)}
-            />
-            <WorkspaceManagerModal
-              visible={workspaceManagerOpen}
-              workspaces={workspaces}
-              onAdd={addWorkspace}
-              onUpdate={updateWorkspace}
-              onReorder={reorderWorkspaces}
-              onDelete={deleteWorkspace}
-              onClose={() => setWorkspaceManagerOpen(false)}
-            />
-            <DatePickerModal
-              visible={datePickerOpen}
-              date={selectedDate}
-              onSelect={setSelectedDate}
-              onClose={() => setDatePickerOpen(false)}
-            />
-          </SystemScreen>
-        </SafeAreaProvider>
-      </KeyboardProvider>
-    </GestureHandlerRootView>
+              scrollEventThrottle={16}
+            >
+              <View style={[styles.desktopGrid, styles.desktopFrame]}>
+                <View style={styles.column}>{dailyPanel}</View>
+                <View style={styles.column}>{statisticsPanel}</View>
+              </View>
+            </ScrollView>
+          )}
+          <CategoryEditor
+            visible={editorOpen}
+            categories={categories}
+            groups={groups}
+            selectedCategoryId={selectedCategoryId}
+            selectedGroupId={selectedGroupId}
+            onClose={() => setEditorOpen(false)}
+            onSelect={setSelectedCategoryId}
+            onAddGroup={addGroup}
+            onAddCategoryToGroup={addCategoryToGroup}
+            onRestoreDefaults={restoreDefaults}
+            onDeleteGroup={deleteGroup}
+            onDelete={deleteCategory}
+            onMoveCategory={moveCategory}
+            onToggleGroupEnabled={toggleGroupEnabled}
+            entryCounts={entryCounts}
+            onUpdate={updateCategory}
+            onSelectGroup={setSelectedGroupId}
+            onUpdateGroup={updateGroup}
+          />
+          <StatisticsSettings
+            visible={statisticsSettingsOpen}
+            settings={statisticsSettings}
+            onChange={setStatisticsSettings}
+            onOpenCategorySettings={() => {
+              setStatisticsSettingsOpen(false);
+              setEditorOpen(true);
+            }}
+            onClose={() => setStatisticsSettingsOpen(false)}
+          />
+          <SettingsDrawer
+            visible={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            onExport={() => {
+              setSettingsOpen(false);
+              setExportOpen(true);
+            }}
+            onImport={() => {
+              setSettingsOpen(false);
+              setImportOpen(true);
+            }}
+          />
+          <ExportDataModal
+            visible={exportOpen}
+            workspaces={transferWorkspaces}
+            globals={transferGlobals}
+            onClose={() => setExportOpen(false)}
+          />
+          <ImportDataModal
+            visible={importOpen}
+            workspaces={transferWorkspaces}
+            globals={transferGlobals}
+            onApply={applyImportPlan}
+            onClose={() => setImportOpen(false)}
+          />
+          <WorkspaceManagerModal
+            visible={workspaceManagerOpen}
+            workspaces={workspaces}
+            onAdd={addWorkspace}
+            onUpdate={updateWorkspace}
+            onReorder={reorderWorkspaces}
+            onDelete={deleteWorkspace}
+            onClose={() => setWorkspaceManagerOpen(false)}
+          />
+          <DatePickerModal
+            visible={datePickerOpen}
+            date={selectedDate}
+            onSelect={setSelectedDate}
+            onClose={() => setDatePickerOpen(false)}
+          />
+          <ConfirmDialog />
+        </SafeAreaView>
+      </SafeAreaProvider>
+    </KeyboardProvider>
   );
 };
 
@@ -1661,185 +1322,5 @@ const PageTab = ({
     </Text>
   </Pressable>
 );
-
-const styles = StyleSheet.create({
-  gestureRoot: { flex: 1 },
-  pagerViewport: { flex: 1, overflow: 'hidden' },
-  pagerTrack: { flex: 1, flexDirection: 'row' },
-  root: { flex: 1, backgroundColor: colors.canvas },
-  loading: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.canvas,
-  },
-  loadingText: { color: colors.muted, fontSize: 15 },
-  header: {
-    backgroundColor: '#eaf0f7',
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  headerTop: { flexDirection: 'row', alignItems: 'center' },
-  headerTopMobile: { alignItems: 'stretch', flexDirection: 'column' },
-  headerSide: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  headerSideRight: { justifyContent: 'flex-end' },
-  mobileHeaderRow: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 48,
-    position: 'relative',
-  },
-  mobileHeaderUtilities: { position: 'absolute', right: 0, top: 2 },
-  headerUtilities: { alignItems: 'center', flexDirection: 'row' },
-  menuButton: {
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 6,
-    minWidth: 118,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  menuButtonMobile: { height: 48, minWidth: 0, width: 112 },
-  menuText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 16,
-    textAlign: 'center',
-  },
-  menuTextMobile: { width: 88 },
-  titleArea: { alignItems: 'center', flex: 1 },
-  titleAreaMobile: {
-    alignItems: 'center',
-    flexBasis: 'auto',
-    flexGrow: 0,
-    flexShrink: 0,
-    maxWidth: '72%',
-    marginTop: 0,
-  },
-  dateNavRow: { alignItems: 'center', flexDirection: 'row', gap: 4 },
-  dateNavButton: {
-    alignItems: 'center',
-    height: 44,
-    justifyContent: 'center',
-    width: 44,
-  },
-  dateNavButtonMobile: { height: 36, width: 36 },
-  date: { color: colors.text, fontSize: 17, fontWeight: '700', flexShrink: 1 },
-  jumpToToday: {
-    color: colors.primary,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  jumpToTodayButton: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 24,
-  },
-  settingsButton: {
-    alignItems: 'center',
-    height: 40,
-    justifyContent: 'center',
-    marginLeft: 6,
-    width: 40,
-  },
-  settingsButtonMobile: { height: 36, marginLeft: 0, width: 36 },
-  modeRow: { alignSelf: 'center', flexDirection: 'row', marginTop: 9 },
-  modeRowMobile: { marginTop: 10 },
-  workspaceNotes: {
-    color: colors.muted,
-    fontSize: 12,
-    marginTop: 6,
-    textAlign: 'center',
-  },
-  pageTabs: {
-    flexDirection: 'row',
-    backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  pageTab: { flex: 1, alignItems: 'center', paddingVertical: 11 },
-  pageTabActive: { borderBottomWidth: 3, borderBottomColor: colors.primary },
-  pageTabText: { color: colors.muted, fontWeight: '700', fontSize: 13 },
-  pageTabTextActive: { color: colors.primary },
-  content: { padding: 14, paddingBottom: 34 },
-  dailyPage: { gap: 12 },
-  dailyEditButton: {
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 6,
-    justifyContent: 'center',
-    minHeight: 48,
-    width: '100%',
-  },
-  dailyEditButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  desktopGrid: { flexDirection: 'row', gap: 18, alignItems: 'flex-start' },
-  column: { flex: 1, gap: 18 },
-  categoryNames: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 7,
-    marginTop: 14,
-  },
-  categoryChip: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    backgroundColor: '#fbfcfe',
-  },
-  categoryChipText: { color: colors.muted, fontSize: 12, fontWeight: '700' },
-  categoryIndex: { marginBottom: 14 },
-  empty: { color: colors.muted, fontSize: 13 },
-  dailyGroup: { marginBottom: 12 },
-  dailyGroupHeader: {
-    alignItems: 'center',
-    borderBottomColor: colors.border,
-    borderBottomWidth: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-    paddingBottom: 4,
-  },
-  dailyGroupTitle: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-  },
-  // Slightly larger/bolder than category titles (16/700) so group names stand out above them.
-  dailyGroupTitleLarge: {
-    color: colors.text,
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  dailyGroupChevron: { color: colors.muted, fontSize: 16, fontWeight: '700' },
-  statistics: { flex: 1 },
-  statisticsHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  statisticsTitle: { color: colors.text, fontSize: 20, fontWeight: '700' },
-  weeklyRow: {
-    borderTopColor: '#d9e1eb',
-    borderTopWidth: 1,
-    paddingVertical: 10,
-  },
-  weeklyName: { color: colors.text, fontSize: 14, fontWeight: '700' },
-  weeklyValue: {
-    color: colors.primary,
-    fontSize: 22,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  weeklyMeta: { color: colors.muted, fontSize: 12, marginTop: 2 },
-  sectionGap: { height: 18 },
-});
 
 export default App;

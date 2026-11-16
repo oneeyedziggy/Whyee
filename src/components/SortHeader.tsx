@@ -1,5 +1,4 @@
 import {
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -9,6 +8,7 @@ import {
 } from 'react-native';
 import type { SortDirection } from '../lib/sort';
 import { colors } from '../theme/tokens';
+import { HoverTitle } from './HoverTitle';
 
 export const SortHeader = ({
   label,
@@ -31,14 +31,13 @@ export const SortHeader = ({
         : 'unsorted';
   const accessibilityLabel = `${label}, ${directionLabel}. Activate to change sort order.`;
 
-  return (
+  const header = (
     <Pressable
       accessibilityLabel={accessibilityLabel}
       accessibilityRole="button"
       accessibilityHint={hint}
       onPress={onPress}
       style={[styles.header, style]}
-      {...(Platform.OS === 'web' && hint ? { title: hint } : {})}
     >
       <View style={styles.content}>
         <Text style={styles.label} numberOfLines={1}>
@@ -61,6 +60,9 @@ export const SortHeader = ({
       </View>
     </Pressable>
   );
+
+  // react-native-web drops `title` on Pressable, so the hint tooltip needs a DOM wrapper.
+  return hint ? <HoverTitle text={hint}>{header}</HoverTitle> : header;
 };
 
 const styles = StyleSheet.create({

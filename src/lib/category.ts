@@ -2,71 +2,292 @@ import { createId } from './id';
 import type {
   CategoryDefinition,
   CategoryKind,
-  ChoiceCategory,
   ChoiceOption,
   NumericCategory,
   SummaryVerb,
   VirtualSeriesDefinition,
+  VirtualSeriesField,
 } from '../types/category';
 
-export const makeSentimentSeries = (
-  categoryId: string,
-  name: string,
-): VirtualSeriesDefinition => ({
-  id: `${categoryId}:sentiment`,
-  name: `${name} sentiment`,
-  sourceCategoryId: categoryId,
-  field: 'noteText',
-  aggregation: 'mean',
-  transform: 'sentimentScore',
-});
+const valueStats: SummaryVerb[] = [
+  'mean',
+  'median',
+  'sum',
+  'product',
+  'min',
+  'max',
+];
+const durationStats: SummaryVerb[] = ['sum', 'mean', 'median', 'min', 'max'];
+const timeStats: SummaryVerb[] = ['mean', 'median', 'min', 'max'];
+const noteStats: SummaryVerb[] = ['mean', 'median', 'sum', 'min', 'max'];
+const statGroups: Record<SummaryVerb, string> = {
+  mean: 'Mean',
+  median: 'Median',
+  sum: 'Sum',
+  product: 'Product',
+  min: 'Minimum',
+  max: 'Maximum',
+  count: 'Entries',
+};
+const durationLabels: Partial<Record<SummaryVerb, string>> = {
+  sum: 'total duration',
+  mean: 'mean duration',
+  median: 'median duration',
+  min: 'shortest duration',
+  max: 'longest duration',
+};
+const timeLabels: Partial<Record<SummaryVerb, string>> = {
+  mean: 'mean',
+  median: 'median',
+  min: 'earliest',
+  max: 'latest',
+};
+const noteMetrics: Array<[VirtualSeriesField, string, string]> = [
+  ['noteWordCount', 'words', 'word count'],
+  ['noteLength', 'length', 'length'],
+  ['noteAverageWordLength', 'word-length', 'average word length'],
+  ['noteDistinctWords', 'distinct-words', 'distinct word count'],
+];
 
-export const makeInverseSeries = (
+// Split / lap modes record several entries per day even when the setting itself is off.
+export const allowsMultiplePerDay = (category: CategoryDefinition): boolean =>
+  category.allowMultiplePerDay ||
+  (category.kind === 'duration' && category.duration.splitEnabled) ||
+  (category.kind === 'counter' && category.counter.splitEnabled);
+
+const primaryStat = (
   category: CategoryDefinition,
-): VirtualSeriesDefinition => ({
-  id: `${category.id}:inverse`,
-  name: `${category.name} inverse`,
-  sourceCategoryId: category.id,
-  field: 'value',
-  aggregation: category.mainAggregation,
-  transform: 'inverse',
-});
+  stats: SummaryVerb[],
+): SummaryVerb =>
+  category.mainAggregation && stats.includes(category.mainAggregation)
+    ? category.mainAggregation
+    : category.kind === 'counter' || category.kind === 'duration'
+      ? 'sum'
+      : 'mean';
 
-const getOptionVirtualSeries = (
-  category: ChoiceCategory,
-): VirtualSeriesDefinition[] =>
-  category.options.map((option) => ({
-    id: `${category.id}:option:${option.id}`,
-    name: `${category.name}: ${option.label}`,
-    sourceCategoryId: category.id,
-    field: 'optionSelected',
-    optionValue: option.value,
-    aggregation: category.optionOccurrenceMode === 'sum' ? 'sum' : 'max',
-  }));
-
-const getBaseVirtualSeries = (
+// The series enabled for new categories and charted by default.
+export const primarySeriesId = (
   category: CategoryDefinition,
-): VirtualSeriesDefinition[] => {
-  if (category.kind === 'notes') return [];
+): string | undefined => {
+  const { id } = category;
+  const multiple = allowsMultiplePerDay(category);
   if (
     category.kind === 'multiple-choice' &&
     category.optionSeriesMode === 'items'
   )
-    return getOptionVirtualSeries(category);
-  if (category.kind === 'duration' || category.kind === 'counter')
-    return getDefaultVirtualSeries(category.id, category.name, category.kind);
-  if (category.allowMultiplePerDay)
-    return getDefaultVirtualSeries(category.id, category.name, category.kind);
-  return [
-    {
-      id: category.id,
-      name: `${category.name} raw`,
-      sourceCategoryId: category.id,
-      field: 'value',
-      aggregation: 'mean',
-    },
-  ];
+    return category.options[0]
+      ? `${id}:option:${category.options[0].id}`
+      : undefined;
+  if (category.kind === 'notes') {
+    const base = category.sentimentEnabled ? 'sentiment' : 'note:words';
+    return multiple
+      ? `${id}:${base}:${primaryStat(category, noteStats)}`
+      : `${id}:${base}`;
+  }
+  if (category.kind === 'duration')
+    return multiple
+      ? `${id}:duration:${primaryStat(category, durationStats)}`
+      : `${id}:duration`;
+  return multiple
+    ? `${id}:value:${primaryStat(category, valueStats)}`
+    : `${id}:value`;
 };
+
+interface GeneratedSeries {
+  definition: VirtualSeriesDefinition;
+  aliases: string[];
+}
+
+const generateVirtualSeries = (
+  category: CategoryDefinition,
+): GeneratedSeries[] => {
+  const { id, name } = category;
+  const multiple = allowsMultiplePerDay(category);
+  const generated: GeneratedSeries[] = [];
+  const add = (
+    suffix: string,
+    label: string,
+    field: VirtualSeriesField,
+    aggregation: SummaryVerb,
+    extra: Partial<VirtualSeriesDefinition>,
+    aliases: string[] = [],
+  ) =>
+    generated.push({
+      definition: {
+        id: `${id}:${suffix}`,
+        name: `${name} ${label}`,
+        sourceCategoryId: id,
+        field,
+        aggregation,
+        enabled: false,
+        ...extra,
+      },
+      aliases,
+    });
+  const entries = (
+    field: VirtualSeriesField,
+    label: string,
+    aliases: string[],
+  ) => {
+    add(
+      'instance',
+      label,
+      field,
+      'mean',
+      { perInstance: true, group: 'Entries' },
+      aliases,
+    );
+    add('count', 'count', field, 'count', { group: 'Entries' }, [
+      `${id}:counter:count`,
+      `${id}:durationMs:count`,
+    ]);
+  };
+
+  if (
+    category.kind === 'multiple-choice' &&
+    category.optionSeriesMode === 'items'
+  )
+    for (const option of category.options)
+      generated.push({
+        definition: {
+          id: `${id}:option:${option.id}`,
+          name: `${name}: ${option.label}`,
+          sourceCategoryId: id,
+          field: 'optionSelected',
+          optionValue: option.value,
+          aggregation: category.optionOccurrenceMode === 'sum' ? 'sum' : 'max',
+          enabled: true,
+        },
+        aliases: [],
+      });
+  else if (category.kind === 'duration') {
+    if (!multiple) {
+      add('duration', 'duration', 'durationMs', 'sum', {}, [
+        `${id}:durationMs:sum`,
+      ]);
+      add('start', 'start time', 'startTime', 'min', {}, [
+        `${id}:startTime:min`,
+        `${id}:startTime:mean`,
+      ]);
+      add('stop', 'stop time', 'stopTime', 'max', {}, [
+        `${id}:stopTime:max`,
+        `${id}:stopTime:mean`,
+      ]);
+    } else {
+      entries('durationMs', 'duration per entry', [`${id}:durationMs:mean`]);
+      for (const stat of durationStats) {
+        const group = { group: statGroups[stat] };
+        add(
+          `duration:${stat}`,
+          durationLabels[stat]!,
+          'durationMs',
+          stat,
+          group,
+          stat === 'mean' ? [] : [`${id}:durationMs:${stat}`],
+        );
+        if (timeStats.includes(stat)) {
+          add(
+            `start:${stat}`,
+            `${timeLabels[stat]} start time`,
+            'startTime',
+            stat,
+            group,
+            stat === 'mean' || stat === 'min'
+              ? [`${id}:startTime:${stat}`]
+              : [],
+          );
+          add(
+            `stop:${stat}`,
+            `${timeLabels[stat]} stop time`,
+            'stopTime',
+            stat,
+            group,
+            stat === 'mean' || stat === 'max' ? [`${id}:stopTime:${stat}`] : [],
+          );
+        }
+      }
+    }
+  } else if (category.kind !== 'notes') {
+    if (!multiple)
+      add('value', 'value', 'value', 'mean', { name }, [
+        id,
+        `${id}:counter:sum`,
+      ]);
+    else {
+      entries('value', 'instance', []);
+      for (const stat of valueStats)
+        add(
+          `value:${stat}`,
+          stat,
+          'value',
+          stat,
+          { group: statGroups[stat] },
+          stat === 'sum' ? [`${id}:sum`, `${id}:counter:sum`] : [],
+        );
+    }
+  }
+
+  if (category.kind === 'notes' || category.notesEnabled) {
+    const noteSeries: Array<
+      [string, string, VirtualSeriesField, Partial<VirtualSeriesDefinition>]
+    > = [
+      ...(category.sentimentEnabled
+        ? [
+            [
+              'sentiment',
+              'sentiment',
+              'noteText',
+              { transform: 'sentimentScore' as const },
+            ] as [
+              string,
+              string,
+              VirtualSeriesField,
+              Partial<VirtualSeriesDefinition>,
+            ],
+          ]
+        : []),
+      ...noteMetrics.map(
+        ([field, key, label]) =>
+          [`note:${key}`, label, field, {}] as [
+            string,
+            string,
+            VirtualSeriesField,
+            Partial<VirtualSeriesDefinition>,
+          ],
+      ),
+    ];
+    for (const [suffix, label, field, extra] of noteSeries) {
+      const sentiment = suffix === 'sentiment';
+      if (!multiple)
+        add(suffix, label, field, 'mean', { ...extra, enabled: sentiment });
+      else
+        for (const stat of noteStats)
+          add(
+            `${suffix}:${stat}`,
+            `${stat} ${label}`,
+            field,
+            stat,
+            {
+              ...extra,
+              group: statGroups[stat],
+              enabled: sentiment && stat === 'mean',
+            },
+            sentiment && stat === 'mean' ? [`${id}:sentiment`] : [],
+          );
+    }
+  }
+  return generated;
+};
+
+// Maps pre-rework series IDs to their current equivalents so saved choices carry over.
+export const getVirtualSeriesAliases = (
+  category: CategoryDefinition,
+): Map<string, string> =>
+  new Map(
+    generateVirtualSeries(category).flatMap(({ definition, aliases }) =>
+      aliases.map((alias) => [alias, definition.id] as const),
+    ),
+  );
 
 // Rebuilds the canonical series list for the current config, keeping prior enabled flags.
 export const recomputeVirtualSeries = (
@@ -75,175 +296,27 @@ export const recomputeVirtualSeries = (
   const previous = new Map(
     category.virtualSeries.map((definition) => [definition.id, definition]),
   );
-  const inverse = category.virtualSeries.find(
-    (definition) => definition.transform === 'inverse',
+  // Legacy standalone inverse series become the inverse toggle on the primary series.
+  const legacyInverse = category.virtualSeries.some(
+    (definition) =>
+      definition.transform === 'inverse' && definition.enabled !== false,
   );
-  const next = [
-    ...getBaseVirtualSeries(category),
-    ...(category.notesEnabled && category.sentimentEnabled
-      ? [makeSentimentSeries(category.id, category.name)]
-      : []),
-    ...(inverse ? [makeInverseSeries(category)] : []),
-  ];
-  return next.map((definition) => ({
-    ...definition,
-    enabled: previous.get(definition.id)?.enabled ?? definition.enabled,
-  }));
-};
-
-const createVirtualSeries = (
-  categoryId: string,
-  name: string,
-  field: 'startTime' | 'stopTime' | 'durationMs',
-  aggregation: SummaryVerb,
-): VirtualSeriesDefinition => ({
-  id: `${categoryId}:${field}:${aggregation}`,
-  name,
-  sourceCategoryId: categoryId,
-  field,
-  aggregation,
-});
-
-export const getDefaultVirtualSeries = (
-  categoryId: string,
-  name: string,
-  kind: CategoryKind,
-) => {
-  if (kind === 'duration') {
-    return [
-      createVirtualSeries(
-        categoryId,
-        `${name} total duration`,
-        'durationMs',
-        'sum',
-      ),
-      {
-        ...createVirtualSeries(
-          categoryId,
-          `${name} duration per entry`,
-          'durationMs',
-          'mean',
-        ),
-        perInstance: true,
-        enabled: false,
-      },
-      {
-        ...createVirtualSeries(
-          categoryId,
-          `${name} longest duration`,
-          'durationMs',
-          'max',
-        ),
-        enabled: false,
-      },
-      {
-        ...createVirtualSeries(
-          categoryId,
-          `${name} shortest duration`,
-          'durationMs',
-          'min',
-        ),
-        enabled: false,
-      },
-      {
-        ...createVirtualSeries(
-          categoryId,
-          `${name} count`,
-          'durationMs',
-          'count',
-        ),
-        enabled: false,
-      },
-      {
-        ...createVirtualSeries(
-          categoryId,
-          `${name} average start time`,
-          'startTime',
-          'mean',
-        ),
-        enabled: false,
-      },
-      {
-        ...createVirtualSeries(
-          categoryId,
-          `${name} average stop time`,
-          'stopTime',
-          'mean',
-        ),
-        enabled: false,
-      },
-      {
-        ...createVirtualSeries(
-          categoryId,
-          `${name} first start time`,
-          'startTime',
-          'min',
-        ),
-        enabled: false,
-      },
-      {
-        ...createVirtualSeries(
-          categoryId,
-          `${name} last stop time`,
-          'stopTime',
-          'max',
-        ),
-        enabled: false,
-      },
-    ];
-  }
-
-  if (kind === 'counter') {
-    return [
-      {
-        id: `${categoryId}:counter:sum`,
-        name: `${name} total`,
-        sourceCategoryId: categoryId,
-        field: 'value' as const,
-        aggregation: 'sum' as const,
-      },
-      {
-        id: `${categoryId}:counter:count`,
-        name: `${name} count`,
-        sourceCategoryId: categoryId,
-        field: 'value' as const,
-        aggregation: 'count' as const,
-      },
-    ];
-  }
-
-  if (kind === 'multiple-choice' || kind === 'number') {
-    return [
-      {
-        id: `${categoryId}:instance`,
-        name: `${name} instance`,
-        sourceCategoryId: categoryId,
-        field: 'value' as const,
-        aggregation: 'mean' as const,
-        perInstance: true,
-      },
-      {
-        id: `${categoryId}:sum`,
-        name: `${name} sum`,
-        sourceCategoryId: categoryId,
-        field: 'value' as const,
-        aggregation: 'sum' as const,
-      },
-      {
-        id: `${categoryId}:count`,
-        name: `${name} count`,
-        sourceCategoryId: categoryId,
-        field: 'value' as const,
-        aggregation: 'count' as const,
-      },
-    ];
-  }
-
-  if (kind === 'notes') {
-    return [];
-  }
-
-  return [];
+  const primary = primarySeriesId(category);
+  return generateVirtualSeries(category).map(({ definition, aliases }) => {
+    const prior = [definition.id, ...aliases]
+      .map((candidate) => previous.get(candidate))
+      .find((candidate) => candidate !== undefined);
+    const inverseEnabled =
+      prior?.inverseEnabled ?? (legacyInverse && definition.id === primary);
+    const { inverseEnabled: ignored, ...rest } = definition;
+    return {
+      ...rest,
+      enabled: prior
+        ? prior.enabled !== false
+        : definition.enabled === true || definition.id === primary,
+      ...(inverseEnabled ? { inverseEnabled: true } : {}),
+    };
+  });
 };
 
 export const createChoiceOption = (index: number): ChoiceOption => ({
@@ -268,11 +341,27 @@ export const normalizeChoiceOptions = (
 ): ChoiceOption[] =>
   options.map((option, index) => ({ ...option, value: index }));
 
+const nonPrintableChoiceCharacters =
+  /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g;
+
+export const hasPrintableChoiceLabel = (label: string): boolean =>
+  label.replace(nonPrintableChoiceCharacters, '').trim().length > 0;
+
 export const createDefaultCategory = (
   kind: CategoryKind,
   index: number,
   name?: string,
   nameSequence = index + 1,
+): CategoryDefinition => {
+  const category = createCategoryShape(kind, index, name, nameSequence);
+  return { ...category, virtualSeries: recomputeVirtualSeries(category) };
+};
+
+const createCategoryShape = (
+  kind: CategoryKind,
+  index: number,
+  name: string | undefined,
+  nameSequence: number,
 ): CategoryDefinition => {
   const defaultName =
     kind === 'multiple-choice'
@@ -293,13 +382,13 @@ export const createDefaultCategory = (
       nameSequence,
       kind,
       allowMultiplePerDay: false,
-      mainAggregation: 'mean',
       enabled: true,
       notesEnabled: false,
       sentimentEnabled: true,
       correlateWithinGroup: false,
       virtualSeries: [],
       multiSelect: false,
+      showOptionValues: false,
       weeklyEffectEnabled: false,
       optionSeriesMode: 'intensity',
       optionOccurrenceMode: 'capped',
@@ -319,7 +408,6 @@ export const createDefaultCategory = (
       nameSequence,
       kind,
       allowMultiplePerDay: false,
-      mainAggregation: 'sum',
       enabled: true,
       notesEnabled: false,
       sentimentEnabled: true,
@@ -332,7 +420,7 @@ export const createDefaultCategory = (
         animate: true,
         use24HourClock: true,
       },
-      virtualSeries: getDefaultVirtualSeries(id, baseName, kind),
+      virtualSeries: [],
     };
   }
 
@@ -344,7 +432,6 @@ export const createDefaultCategory = (
       nameSequence,
       kind,
       allowMultiplePerDay: false,
-      mainAggregation: 'sum',
       enabled: true,
       notesEnabled: false,
       sentimentEnabled: true,
@@ -355,7 +442,7 @@ export const createDefaultCategory = (
         editable: true,
         splitEnabled: false,
       },
-      virtualSeries: getDefaultVirtualSeries(id, baseName, kind),
+      virtualSeries: [],
     };
   }
 
@@ -371,7 +458,6 @@ export const createDefaultCategory = (
       sentimentEnabled: true,
       correlateWithinGroup: false,
       allowMultiplePerDay: false,
-      mainAggregation: 'mean',
       notes: { sentimentEnabled: true },
       virtualSeries: [],
     };
@@ -383,7 +469,6 @@ export const createDefaultCategory = (
     nameSequence,
     kind,
     allowMultiplePerDay: false,
-    mainAggregation: 'mean',
     enabled: true,
     notesEnabled: false,
     sentimentEnabled: true,
@@ -418,7 +503,9 @@ export const switchCategoryKind = (
         }
       : { ...switched, savedTypeSettings }
   ) as CategoryDefinition;
-  return { ...next, virtualSeries: recomputeVirtualSeries(next) };
+  const { mainAggregation: legacy, ...withoutLegacy } = next;
+  const current = withoutLegacy as CategoryDefinition;
+  return { ...current, virtualSeries: recomputeVirtualSeries(current) };
 };
 
 const switchKindShape = (
@@ -444,10 +531,6 @@ const switchKindShape = (
           ? category.optionOccurrenceMode
           : 'capped',
       allowMultiplePerDay: category.allowMultiplePerDay,
-      mainAggregation: category.mainAggregation,
-      virtualSeries: category.allowMultiplePerDay
-        ? getDefaultVirtualSeries(category.id, category.name, kind)
-        : category.virtualSeries,
       options:
         category.kind === 'multiple-choice'
           ? normalizeChoiceOptions(category.options)
@@ -471,7 +554,6 @@ const switchKindShape = (
       sentimentEnabled: category.sentimentEnabled,
       correlateWithinGroup: category.correlateWithinGroup,
       allowMultiplePerDay: false,
-      mainAggregation: 'sum',
       duration: {
         splitEnabled: false,
         showMilliseconds: false,
@@ -480,7 +562,7 @@ const switchKindShape = (
         animate: true,
         use24HourClock: true,
       },
-      virtualSeries: getDefaultVirtualSeries(id, category.name, kind),
+      virtualSeries: category.virtualSeries,
     };
   }
 
@@ -495,7 +577,6 @@ const switchKindShape = (
       sentimentEnabled: category.sentimentEnabled,
       correlateWithinGroup: category.correlateWithinGroup,
       allowMultiplePerDay: category.allowMultiplePerDay,
-      mainAggregation: 'sum',
       counter: {
         steps: [-1, 1],
         resetEnabled: false,
@@ -517,7 +598,6 @@ const switchKindShape = (
       sentimentEnabled: true,
       correlateWithinGroup: category.correlateWithinGroup,
       allowMultiplePerDay: category.allowMultiplePerDay,
-      mainAggregation: 'mean',
       notes: { sentimentEnabled: true },
       virtualSeries: [],
     };
@@ -534,31 +614,9 @@ const switchKindShape = (
         ? category.weeklyEffectEnabled
         : false,
     allowMultiplePerDay: category.allowMultiplePerDay,
-    mainAggregation: category.mainAggregation,
-    virtualSeries: category.allowMultiplePerDay
-      ? getDefaultVirtualSeries(category.id, category.name, kind)
-      : category.virtualSeries,
     range:
       category.kind === 'number'
         ? category.range
         : { min: 0, max: 10, step: 1 },
   };
-};
-
-export const moveItem = <T>(
-  items: T[],
-  index: number,
-  direction: -1 | 1,
-): T[] => {
-  const nextIndex = index + direction;
-  if (nextIndex < 0 || nextIndex >= items.length) {
-    return items;
-  }
-
-  const nextItems = [...items];
-  [nextItems[index], nextItems[nextIndex]] = [
-    nextItems[nextIndex],
-    nextItems[index],
-  ];
-  return nextItems;
 };

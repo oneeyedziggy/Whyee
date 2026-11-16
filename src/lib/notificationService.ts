@@ -6,9 +6,13 @@ export interface NotificationResponseData {
   requestId?: string;
   actionIdentifier?: string;
   userText?: string;
+  // true when the user tapped the notification body itself, not an action button
+  isDefaultTap?: boolean;
 }
 
 export interface NotificationService {
+  // whether this build can actually load/use expo-notifications (false in unsupported builds)
+  checkAvailability: () => Promise<boolean>;
   requestPermission: () => Promise<boolean>;
   scheduleCategory: (
     category: CategoryDefinition,
@@ -22,6 +26,7 @@ export interface NotificationService {
 }
 
 export const notificationService: NotificationService = {
+  checkAvailability: async () => false,
   requestPermission: async () => false,
   scheduleCategory: async () => [],
   cancelCategory: async () => undefined,

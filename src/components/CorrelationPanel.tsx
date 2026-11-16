@@ -1,5 +1,4 @@
 import {
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,31 +8,36 @@ import {
 } from 'react-native';
 import { useDeferredValue, useMemo, useState } from 'react';
 import type { CorrelationRow } from '../types/correlation';
-import { nextSortDirection, type SortDirection } from '../lib/sort';
-import { colors } from '../theme/tokens';
+import {
+  compareValues,
+  nextSortDirection,
+  type SortDirection,
+} from '../lib/sort';
+import { colors, shadows } from '../theme/tokens';
 import { Panel } from './Panel';
+import { HoverTitle } from './HoverTitle';
 import { SortHeader } from './SortHeader';
 
-const offsets = Array.from({ length: 32 }, (_, index) => index);
 const rowBatchSize = 24;
 
 // Hover shows the full pair on web; tapping expands it everywhere else.
 const PairLabel = ({ label }: { label: string }) => {
   const [expanded, setExpanded] = useState(false);
   return (
-    <Pressable
-      accessibilityHint="Shows the full pair name"
-      accessibilityLabel={label}
-      accessibilityRole="button"
-      accessibilityState={{ expanded }}
-      onPress={() => setExpanded((current) => !current)}
-      style={styles.pair}
-      {...(Platform.OS === 'web' ? { title: label } : {})}
-    >
-      <Text numberOfLines={expanded ? 0 : 1} style={styles.pairText}>
-        {label}
-      </Text>
-    </Pressable>
+    <HoverTitle text={label}>
+      <Pressable
+        accessibilityHint="Shows the full pair name"
+        accessibilityLabel={label}
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        onPress={() => setExpanded((current) => !current)}
+        style={styles.pair}
+      >
+        <Text numberOfLines={expanded ? 0 : 1} style={styles.pairText}>
+          {label}
+        </Text>
+      </Pressable>
+    </HoverTitle>
   );
 };
 
@@ -87,14 +91,7 @@ export const CorrelationPanel = ({
             ? right.label
             : (right.cells.find((cell) => `${cell.offset}` === sortColumn)
                 ?.value ?? null);
-        if (leftValue === null && rightValue === null) return 0;
-        if (leftValue === null) return 1;
-        if (rightValue === null) return -1;
-        const result =
-          typeof leftValue === 'string' && typeof rightValue === 'string'
-            ? leftValue.localeCompare(rightValue)
-            : Number(leftValue) - Number(rightValue);
-        return sortDirection === 'asc' ? result : -result;
+        return compareValues(leftValue, rightValue, sortDirection);
       }),
     [deferredRows, sortColumn, sortDirection],
   );
@@ -208,6 +205,7 @@ const styles = StyleSheet.create({
   },
   offsetLabel: { color: colors.text, fontSize: 13, fontWeight: '700' },
   offsetInput: {
+    boxShadow: shadows.soft,
     borderColor: colors.border,
     borderRadius: 6,
     borderWidth: 1,
@@ -221,6 +219,7 @@ const styles = StyleSheet.create({
   showMore: { alignItems: 'center', minHeight: 44, justifyContent: 'center' },
   showMoreText: { color: colors.primary, fontSize: 13, fontWeight: '700' },
   table: {
+    boxShadow: shadows.soft,
     borderColor: colors.border,
     borderRadius: 6,
     borderWidth: 1,

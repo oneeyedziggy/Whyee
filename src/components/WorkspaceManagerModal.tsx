@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Eye, EyeOff, Trash2 } from 'lucide-react-native';
+import { AppButton } from './AppButton';
 import {
-  Button,
   Modal,
   Platform,
   Pressable,
@@ -14,7 +14,7 @@ import {
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { isDuplicateWorkspaceName } from '../lib/workspaces';
 import { DraggableList } from './DraggableList';
-import { colors } from '../theme/tokens';
+import { colors, typeScale } from '../theme/tokens';
 import type { WorkspaceMeta } from '../types/workspace';
 import { SystemScreen } from './SystemScreen';
 
@@ -101,7 +101,7 @@ export const WorkspaceManagerModal = ({
                 Each workspace keeps its own categories and logged data.
               </Text>
             </View>
-            <Button title="Done" onPress={onClose} />
+            <AppButton title="Done" onPress={onClose} />
           </View>
           <KeyboardAwareScrollView
             style={styles.scroll}
@@ -285,7 +285,11 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   headerCopy: { flex: 1 },
-  title: { color: colors.text, fontSize: 19, fontWeight: '700' },
+  title: {
+    color: colors.text,
+    fontSize: typeScale.screenTitle,
+    fontWeight: '700',
+  },
   subtitle: { color: colors.muted, fontSize: 13, marginTop: 2 },
   iconButton: {
     alignItems: 'center',

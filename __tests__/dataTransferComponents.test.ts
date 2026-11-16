@@ -20,8 +20,8 @@ describe('data transfer components', () => {
       }),
     );
 
-    fireEvent.press(screen.getByText('Export data'));
-    fireEvent.press(screen.getByText('Import data'));
+    await fireEvent.press(screen.getByText('Export data'));
+    await fireEvent.press(screen.getByText('Import data'));
 
     expect(onExport).toHaveBeenCalledTimes(1);
     expect(onImport).toHaveBeenCalledTimes(1);

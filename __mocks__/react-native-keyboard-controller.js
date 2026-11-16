@@ -8,6 +8,7 @@ const KeyboardAwareScrollView = React.forwardRef((props, ref) =>
 );
 
 module.exports = {
+  KeyboardProvider: ({ children }) => children,
   KeyboardContext: React.createContext({}),
   KeyboardAwareScrollView,
   KeyboardAvoidingView: ScrollView,

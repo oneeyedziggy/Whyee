@@ -1,11 +1,11 @@
 import {
   Alert,
   Button,
+  Linking,
   Modal,
   Platform,
   Pressable,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -14,9 +14,13 @@ import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X } from 'lucide-react-native';
 import { useState } from 'react';
-import { expandNotificationSchedule } from '../lib/notificationSchedule';
+import {
+  expandNotificationSchedule,
+  normalizeNotificationSchedule,
+} from '../lib/notificationSchedule';
 import { notificationService } from '../lib/notificationService';
 import { SystemTimeField } from './SystemTimeField';
+import { ToggleSwitch } from './ToggleSwitch';
 import type {
   CategoryDefinition,
   NotificationSchedule,
@@ -34,9 +38,15 @@ const weekdays = [
   ['Sat', 7],
 ] as const;
 
-const defaultSchedule = (category: CategoryDefinition): NotificationSchedule =>
-  category.notificationSchedule ?? {
-    enabled: false,
+const defaultSchedule = (
+  category: CategoryDefinition,
+): NotificationSchedule => {
+  const normalized = normalizeNotificationSchedule(
+    category.notificationSchedule,
+  );
+  if (normalized?.times.length) return normalized;
+  return {
+    enabled: normalized?.enabled ?? false,
     times: [
       {
         id: `${category.id}-time-1`,
@@ -46,6 +56,7 @@ const defaultSchedule = (category: CategoryDefinition): NotificationSchedule =>
       },
     ],
   };
+};
 
 const formatTime = (time: NotificationTime): string =>
   `${`${time.hour}`.padStart(2, '0')}:${`${time.minute}`.padStart(2, '0')}`;
@@ -107,10 +118,8 @@ export const NotificationSettings = ({
       );
       return;
     }
-    if (
-      !draft.times.length ||
-      draft.times.some((time) => !time.weekdays.length)
-    ) {
+    // The draft always keeps at least one time: Remove only appears while there are several.
+    if (draft.times.some((time) => !time.weekdays.length)) {
       Alert.alert('Choose a schedule', 'Select at least one day and one time.');
       return;
     }
@@ -131,20 +140,39 @@ export const NotificationSettings = ({
     }
     setSaving(true);
     try {
-      if (draft.enabled && !(await notificationService.requestPermission())) {
-        Alert.alert(
-          'Notifications are disabled',
-          'Allow notifications in system settings, then try again.',
-        );
-        return;
+      if (draft.enabled) {
+        if (!(await notificationService.checkAvailability())) {
+          Alert.alert(
+            'Reminders saved but inactive',
+            'This build cannot schedule notifications yet — rebuild with a development client, then reopen this dialog once, to activate them.',
+          );
+          onUpdate({ ...category, notificationSchedule: draft });
+          return;
+        }
+        if (!(await notificationService.requestPermission())) {
+          Alert.alert(
+            'Notifications are disabled',
+            'Allow notifications in system settings to schedule reminders.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            ],
+          );
+          return;
+        }
       }
       await notificationService.cancelCategory(category.id);
-      if (draft.enabled)
-        await notificationService.scheduleCategory(category, specs);
-      onUpdate({ ...category, notificationSchedule: draft });
-    } catch {
-      // notificationService already logs a warning and no-ops (e.g. Expo Go on SDK 53+ lacks
-      // Android notification support there); still save the schedule so it applies once built.
+      if (draft.enabled) {
+        try {
+          await notificationService.scheduleCategory(category, specs);
+        } catch (error) {
+          Alert.alert(
+            "Couldn't schedule reminders",
+            error instanceof Error ? error.message : 'Please try again.',
+          );
+          return;
+        }
+      }
       onUpdate({ ...category, notificationSchedule: draft });
     } finally {
       setSaving(false);
@@ -181,9 +209,8 @@ export const NotificationSettings = ({
           <Text style={styles.categoryName}>{category.name}</Text>
           <View style={styles.row}>
             <Text style={styles.label}>Enabled</Text>
-            <Switch
+            <ToggleSwitch
               accessibilityLabel={`Notifications for ${category.name}`}
-              accessibilityState={{ checked: draft.enabled }}
               value={draft.enabled}
               onValueChange={(enabled) =>
                 setDraft((current) => ({ ...current, enabled }))
@@ -280,7 +307,7 @@ export const NotificationSettings = ({
                     id: `${category.id}-time-${Date.now()}`,
                     hour: 12,
                     minute: 0,
-                    weekdays: current.times[0]?.weekdays.length
+                    weekdays: current.times[0].weekdays.length
                       ? [...current.times[0].weekdays]
                       : [1, 2, 3, 4, 5, 6, 7],
                   },

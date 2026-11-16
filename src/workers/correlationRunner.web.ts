@@ -62,21 +62,29 @@ class CorrelationWorkerClient {
 
 const maximumWorkerCount = 4;
 const chunkSize = 64;
-let workerPool: CorrelationWorkerClient[] | null = null;
+// undefined = not attempted yet; null = workers cannot be constructed here.
+let workerPool: CorrelationWorkerClient[] | null | undefined;
 let nextGeneration = 1;
 
-const getWorkerPool = (): CorrelationWorkerClient[] => {
-  if (!workerPool) {
-    const reportedConcurrency = navigator.hardwareConcurrency || 4;
-    const workerCount = Math.max(
-      1,
-      Math.min(maximumWorkerCount, reportedConcurrency - 1),
-    );
-    workerPool = Array.from(
-      { length: workerCount },
-      () => new CorrelationWorkerClient(),
-    );
+const createWorkerPool = (): CorrelationWorkerClient[] | null => {
+  const reportedConcurrency = navigator.hardwareConcurrency || 4;
+  const workerCount = Math.max(
+    1,
+    Math.min(maximumWorkerCount, reportedConcurrency - 1),
+  );
+  const clients: CorrelationWorkerClient[] = [];
+  try {
+    for (let index = 0; index < workerCount; index += 1)
+      clients.push(new CorrelationWorkerClient());
+    return clients;
+  } catch {
+    for (const client of clients) client.worker.terminate();
+    return null;
   }
+};
+
+const getWorkerPool = (): CorrelationWorkerClient[] | null => {
+  if (workerPool === undefined) workerPool = createWorkerPool();
   return workerPool;
 };
 
@@ -84,16 +92,15 @@ export const runCorrelation = (
   request: CorrelationRequest,
   onBatch?: CorrelationBatchListener,
 ): CorrelationTask => {
-  if (typeof Worker === 'undefined') return createCorrelationTask(request, onBatch);
+  const pool = typeof Worker === 'undefined' ? null : getWorkerPool();
+  if (!pool) return createCorrelationTask(request, onBatch);
 
   const generation = nextGeneration;
   nextGeneration += 1;
   let cancelled = false;
-  let settled = false;
-  let rejectTask: ((reason?: unknown) => void) | null = null;
+  let rejectTask!: (reason?: unknown) => void;
 
   const execute = async (): Promise<CorrelationRow[]> => {
-    const pool = getWorkerPool();
     const preparation = await pool[0].request({
       type: 'prepare',
       generation,
@@ -147,27 +154,15 @@ export const runCorrelation = (
 
   const promise = new Promise<CorrelationRow[]>((resolve, reject) => {
     rejectTask = reject;
-    execute().then(
-      (rows) => {
-        if (settled) return;
-        settled = true;
-        resolve(rows);
-      },
-      (error) => {
-        if (settled) return;
-        settled = true;
-        reject(error);
-      },
-    );
+    // Settling an already-cancelled promise is a no-op, so late results are dropped.
+    execute().then(resolve, reject);
   });
 
   return {
     promise,
     cancel: () => {
-      if (settled) return;
-      settled = true;
       cancelled = true;
-      rejectTask?.(new CorrelationCancelledError());
+      rejectTask(new CorrelationCancelledError());
     },
   };
 };

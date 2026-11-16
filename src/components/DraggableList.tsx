@@ -106,14 +106,18 @@ const DraggableRow = memo(
     gapHeight: number;
     gapStyle?: ViewStyle;
     renderItem: (item: unknown, state: DraggableItemState) => ReactNode;
-    registerHeight: (key: string, height: number) => void;
+    registerHeight: (key: string, position: number, height: number) => void;
     panHandlers: GestureResponderHandlers;
     heldWrapperStyle: ViewStyle;
     heldRowStyle: Animated.WithAnimatedObject<ViewStyle>;
   }) => (
     <View
       onLayout={(event) =>
-        registerHeight(rowKey, event.nativeEvent.layout.height)
+        registerHeight(
+          rowKey,
+          event.nativeEvent.layout.y,
+          event.nativeEvent.layout.height,
+        )
       }
       style={held ? heldWrapperStyle : undefined}
     >

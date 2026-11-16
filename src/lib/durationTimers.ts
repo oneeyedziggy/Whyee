@@ -120,6 +120,7 @@ export const stopDurationRecord = (
     {
       ...record,
       stopTime,
+      stopDateManual: undefined,
     },
     [
       ...getCompletedDurationIntervals({ ...record, stopTime: undefined }),
@@ -129,6 +130,73 @@ export const stopDurationRecord = (
         durationMs: stopMs - startMs,
       },
     ],
+    showMilliseconds,
+  );
+};
+
+// The visible stop is authoritative, including when a saved run still has its old stop.
+export const resumeDurationRecord = (
+  record: CategorySelectionRecord,
+  resumedAt: Date,
+  showMilliseconds: boolean,
+): CategorySelectionRecord | null => {
+  const stopMs = parsedTime(record.stopTime);
+  if (stopMs === null || !Number.isFinite(resumedAt.getTime())) return null;
+  const completed = editDurationStopTime(
+    record,
+    new Date(stopMs),
+    showMilliseconds,
+  );
+  if (!completed) return null;
+  return {
+    ...completed,
+    startTime: resumedAt.toISOString(),
+    stopTime: undefined,
+    stopDateManual: undefined,
+  };
+};
+
+// Start/stop editors address the interval as a whole: after a stop-and-resume the visible start
+// is still the first banked run, and each end of the range is bounded by the run it belongs to.
+export const getDurationEditBounds = (
+  record: CategorySelectionRecord,
+): { startTime?: string; startMax?: string; stopMin?: string } => {
+  const runs = record.durationRuns ?? [];
+  return {
+    startTime: runs[0]?.startTime ?? record.startTime,
+    startMax: runs[0]?.stopTime ?? record.stopTime,
+    stopMin: runs.length ? runs[runs.length - 1].startTime : record.startTime,
+  };
+};
+
+// Edits the interval's OVERALL start, which is the first banked run once a timer has been
+// stopped and resumed; the record stamp only moves when it still points at that same run.
+export const editDurationStartTime = (
+  record: CategorySelectionRecord,
+  startedAt: Date,
+  showMilliseconds: boolean,
+): CategorySelectionRecord | null => {
+  const startMs = startedAt.getTime();
+  if (!Number.isFinite(startMs)) return null;
+  const startTime = startedAt.toISOString();
+  const completed = getCompletedDurationIntervals(record);
+  if (!completed.length) {
+    const stopMs = parsedTime(record.stopTime);
+    if (stopMs !== null && stopMs < startMs) return null;
+    return { ...record, startTime };
+  }
+  const firstStopMs = Date.parse(completed[0].stopTime);
+  if (firstStopMs < startMs) return null;
+  const durationRuns = completed.map((run, index) =>
+    index === 0
+      ? { ...run, startTime, durationMs: firstStopMs - startMs }
+      : run,
+  );
+  return withDurationTotal(
+    record.startTime === completed[0].startTime
+      ? { ...record, startTime }
+      : record,
+    durationRuns,
     showMilliseconds,
   );
 };
@@ -234,8 +302,8 @@ export const findCarryoverTimers = (
     })
     .sort(
       (left, right) =>
-        (parsedTime(left.startTime) ?? 0) -
-          (parsedTime(right.startTime) ?? 0) ||
+        // The filter above only keeps records with a parseable start.
+        parsedTime(left.startTime)! - parsedTime(right.startTime)! ||
         left.categoryId.localeCompare(right.categoryId) ||
         left.ordinal - right.ordinal,
     );
@@ -266,13 +334,13 @@ export const splitIntervalHoursByLocalDate = (
   const stop = parsedTime(interval.stopTime);
   if (start === null || stop === null || stop <= start) return values;
   const startDateKey = getLocalDateKey(new Date(start));
-  const startBounds = getLocalDayBounds(startDateKey);
-  if (!startBounds || stop <= startBounds.end) return values;
+  // Keys built by getLocalDateKey are always valid, so the bounds lookups cannot fail.
+  const startBounds = getLocalDayBounds(startDateKey)!;
+  if (stop <= startBounds.end) return values;
   let cursor = start;
   while (cursor < stop) {
     const dateKey = getLocalDateKey(new Date(cursor));
-    const bounds = getLocalDayBounds(dateKey);
-    if (!bounds) break;
+    const bounds = getLocalDayBounds(dateKey)!;
     const segmentEnd = Math.min(stop, bounds.end);
     values.set(
       dateKey,

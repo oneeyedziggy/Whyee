@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Button,
   Modal,
   Pressable,
   StyleSheet,
@@ -17,8 +16,9 @@ import {
   documentationSections,
   type DocumentationSectionId,
 } from '../lib/documentation';
-import { colors } from '../theme/tokens';
+import { colors, typeScale } from '../theme/tokens';
 import { SystemScreen } from './SystemScreen';
+import { AppButton } from './AppButton';
 
 interface DocumentationModalProps {
   visible: boolean;
@@ -84,7 +84,7 @@ export const DocumentationModal = ({
               Concepts, controls, and statistics
             </Text>
           </View>
-          <Button title="Done" onPress={onClose} />
+          <AppButton title="Done" onPress={onClose} />
         </View>
         <TextInput
           accessibilityLabel="Search documentation"
@@ -155,7 +155,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingBottom: 14,
   },
-  title: { color: colors.text, fontSize: 23, fontWeight: '700' },
+  title: {
+    color: colors.text,
+    fontSize: typeScale.screenTitle,
+    fontWeight: '700',
+  },
   subtitle: { color: colors.muted, fontSize: 13, marginTop: 3 },
   search: {
     backgroundColor: colors.surface,

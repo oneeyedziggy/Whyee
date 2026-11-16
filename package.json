@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
-    "@expo/metro-runtime": "~57.0.16",
+    "@expo/metro-runtime": "~57.0.17",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "9.1.0",
     "@react-native-community/slider": "5.2.0",
-    "expo": "~57.0.24",
+    "expo": "~57.0.31",
     "expo-crypto": "~57.0.3",
     "expo-document-picker": "~57.0.2",
     "expo-file-system": "~57.0.7",
@@ -30,11 +30,11 @@
     "sentiment": "^5.0.2"
   },
   "devDependencies": {
-    "@testing-library/react-native": "^14.0.1",
+    "@testing-library/react-native": "^14.1.0",
     "@types/jest": "^29.5.14",
-    "@types/react": "~19.2.2",
-    "babel-preset-expo": "^57.0.9",
-    "jest-expo": "^57.0.5",
+    "@types/react": "~19.2.18",
+    "babel-preset-expo": "^57.0.16",
+    "jest-expo": "^57.0.6",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -43,17 +43,16 @@
     "ios": "expo start --ios",
     "web": "bash scripts/expo-start.sh web",
     "setup:expo-helper": "bash scripts/install-expo-helper.sh",
+    "validate:expo-zod": "node scripts/validate-expo-zod.cjs",
     "test": "jest --runInBand",
+    "test:coverage": "jest --coverage",
     "test:watch": "jest --watch"
   },
-  "jest": {
-    "preset": "jest-expo",
-    "testMatch": [
-      "**/__tests__/**/*.test.ts"
-    ]
-  },
   "overrides": {
-    "uuid": "^11.1.1"
+    "uuid": "^11.1.1",
+    "@expo/cli": {
+      "zod": "4.6.7"
+    }
   },
   "private": true
 }

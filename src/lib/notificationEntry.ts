@@ -38,7 +38,7 @@ const parseNumber = (
 };
 
 const getValue = (
-  category: CategoryDefinition,
+  category: Exclude<CategoryDefinition, { kind: 'duration' }>,
   response: NotificationResponseInput,
   existing?: CategorySelectionRecord,
 ): Partial<CategorySelectionRecord> | undefined => {
@@ -60,30 +60,26 @@ const getValue = (
   }
   if (category.kind === 'counter') {
     const stepIndex = response.actionIdentifier?.replace(/^step:/, '');
+    if (stepIndex === undefined || !/^\d+$/.test(stepIndex)) return undefined;
     const step = category.counter.steps[Number(stepIndex)];
-    if (!Number.isInteger(Number(stepIndex)) || !Number.isFinite(step)) {
-      return undefined;
-    }
+    if (!Number.isFinite(step)) return undefined;
     return {
       value: category.allowMultiplePerDay
         ? step
         : (existing?.value ?? 0) + step,
     };
   }
-  if (category.kind === 'notes') {
-    const noteText = response.userText?.trim();
-    if (!noteText) return undefined;
-    const sentimentScore = category.sentimentEnabled
-      ? scoreSentiment(noteText)
-      : undefined;
-    return {
-      noteText,
-      ...(sentimentScore === undefined
-        ? { value: 0 }
-        : { sentimentScore, value: sentimentScore }),
-    };
-  }
-  return undefined;
+  const noteText = response.userText?.trim();
+  if (!noteText) return undefined;
+  const sentimentScore = category.sentimentEnabled
+    ? scoreSentiment(noteText)
+    : undefined;
+  return {
+    noteText,
+    ...(sentimentScore === undefined
+      ? { value: 0 }
+      : { sentimentScore, value: sentimentScore }),
+  };
 };
 
 export const applyNotificationResponse = (

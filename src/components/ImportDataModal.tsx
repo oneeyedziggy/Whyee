@@ -18,7 +18,8 @@ import {
   resolveDefaultImportTarget,
 } from '../lib/dataTransfer';
 import { pickTransferFile } from '../lib/dataTransferFile';
-import { colors } from '../theme/tokens';
+import { colors, typeScale } from '../theme/tokens';
+import { AppButton } from './AppButton';
 import { WorkspacePicker } from './WorkspacePicker';
 import { SystemScreen } from './SystemScreen';
 import type {
@@ -407,20 +408,16 @@ export const ImportDataModal = ({
           {error ? <Text style={styles.error}>{error}</Text> : null}
         </KeyboardAwareScrollView>
         {parsed && !conflict ? (
-          <Pressable
-            accessibilityRole="button"
-            onPress={beginImport}
-            style={[
-              styles.primaryButton,
-              mode === 'overwrite' && styles.destructiveButton,
-            ]}
-          >
-            <Text style={styles.primaryButtonText}>
-              {mode === 'overwrite'
+          <AppButton
+            size="utility"
+            title={
+              mode === 'overwrite'
                 ? 'Overwrite selected data'
-                : 'Merge selected data'}
-            </Text>
-          </Pressable>
+                : 'Merge selected data'
+            }
+            variant={mode === 'overwrite' ? 'danger' : 'primary'}
+            onPress={beginImport}
+          />
         ) : null}
       </SystemScreen>
     </Modal>
@@ -457,7 +454,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
   },
   headerCopy: { flex: 1 },
-  title: { color: colors.text, fontSize: 23, fontWeight: '700' },
+  title: {
+    color: colors.text,
+    fontSize: typeScale.screenTitle,
+    fontWeight: '700',
+  },
   subtitle: { color: colors.muted, fontSize: 13, marginTop: 3 },
   iconButton: {
     alignItems: 'center',
@@ -529,7 +530,7 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
   },
   segmentText: { color: colors.text, fontSize: 13, fontWeight: '700' },
-  segmentTextActive: { color: '#fff' },
+  segmentTextActive: { color: colors.onPrimary },
   optionGroup: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
@@ -603,19 +604,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-  choiceTextPrimary: { color: '#fff' },
+  choiceTextPrimary: { color: colors.onPrimary },
   error: { color: colors.danger, fontSize: 13, lineHeight: 18 },
-  primaryButton: {
-    alignItems: 'center',
-    alignSelf: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 7,
-    justifyContent: 'center',
-    marginBottom: 24,
-    maxWidth: 520,
-    minHeight: 46,
-    width: '90%',
-  },
-  destructiveButton: { backgroundColor: colors.danger },
-  primaryButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 });

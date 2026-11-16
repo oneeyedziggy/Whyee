@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useDeferredValue, useMemo, useState } from 'react';
 import type { CorrelationRow } from '../types/correlation';
 import { nextSortDirection, type SortDirection } from '../lib/sort';
-import { colors } from '../theme/tokens';
+import { colors, shadows } from '../theme/tokens';
 import { Panel } from './Panel';
 import { SortHeader } from './SortHeader';
 
@@ -57,7 +57,9 @@ export const TopCorrelationsPanel = ({
     () =>
       deferredRows
         .flatMap((row) => {
-          const pair = row.label.split(/\s*x\s*/i);
+          // Labels are `${left} x ${right}`; the separator needs its spaces so
+          // names containing the letter "x" (e.g. "Exercise") stay intact.
+          const pair = row.label.split(/\s+x\s+/);
           const first = pair[0]?.trim() || row.label;
           const second = pair[1]?.trim() || row.label;
           return row.cells
@@ -232,6 +234,7 @@ const styles = StyleSheet.create({
   thresholdLabel: { color: colors.text, fontSize: 13, fontWeight: '700' },
   slider: { marginTop: 4 },
   table: {
+    boxShadow: shadows.soft,
     borderColor: colors.border,
     borderRadius: 6,
     borderWidth: 1,

@@ -82,7 +82,7 @@ export const createTransferBundle = (
 const createIndividualFiles = (bundle: WhyeeTransferBundle): Zippable => {
   const files: Zippable = {};
   for (const workspace of bundle.workspaces) {
-    if (workspace.categories || workspace.groups) {
+    if (workspace.categories) {
       files[`workspaces/${workspace.id}/categories-groups.json`] = jsonBytes({
         id: workspace.id,
         name: workspace.name,
@@ -155,7 +155,7 @@ export const createTransferArchives = (
 
   const archives: TransferArchive[] = [];
   for (const workspace of bundle.workspaces) {
-    if (workspace.categories || workspace.groups) {
+    if (workspace.categories) {
       archives.push({
         fileName: `Whyee.${workspace.id}.categories-groups.config.json`,
         mimeType: 'application/json',

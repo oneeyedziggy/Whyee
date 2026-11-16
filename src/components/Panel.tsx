@@ -1,6 +1,6 @@
 import { type PropsWithChildren } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { colors } from '../theme/tokens';
+import { colors, shadows } from '../theme/tokens';
 import { InfoLink } from './InfoLink';
 import type { DocumentationSectionId } from '../lib/documentation';
 
@@ -40,10 +40,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     padding: 16,
-    shadowColor: colors.shadow,
-    shadowOpacity: 0.06,
-    shadowRadius: 18,
-    elevation: 2,
+    boxShadow: shadows.soft,
   },
   title: { color: colors.text, fontSize: 18, fontWeight: '700' },
   titleRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },

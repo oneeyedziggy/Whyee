@@ -1,0 +1,47 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Validate statistics dialog",
+			"type": "shell",
+			"command": "& 'C:\\Program Files\\nodejs\\node.exe' .\\node_modules\\jest\\bin\\jest.js --ci __tests__/settingsComponents.test.ts; if ($LASTEXITCODE -eq 0) { & 'C:\\Program Files\\nodejs\\node.exe' .\\node_modules\\typescript\\bin\\tsc --noEmit }",
+			"problemMatcher": []
+		},
+		{
+			"label": "Test statistics dialog layout",
+			"type": "shell",
+			"command": "& 'C:\\Program Files\\nodejs\\node.exe' .\\node_modules\\jest\\bin\\jest.js --ci __tests__/statisticsSettingsLayout.test.ts __tests__/settingsComponents.test.ts",
+			"problemMatcher": []
+		},
+		{
+			"label": "Validate historical chart interactions",
+			"type": "shell",
+			"command": "& 'C:\\Program Files\\nodejs\\node.exe' .\\node_modules\\jest\\bin\\jest.js --ci __tests__/chartsPanel.test.ts __tests__/chartPersistence.test.ts",
+			"problemMatcher": []
+		},
+		{
+			"label": "Test daily entry button placement",
+			"type": "shell",
+			"command": "& 'C:\\Program Files\\nodejs\\node.exe' .\\node_modules\\jest\\bin\\jest.js --ci __tests__/dailyEntryPane.test.ts",
+			"problemMatcher": []
+		},
+		{
+			"label": "Validate main panel controls",
+			"type": "shell",
+			"command": "& 'C:\\Program Files\\nodejs\\node.exe' .\\node_modules\\jest\\bin\\jest.js --ci __tests__/categoryInput.test.ts __tests__/categoryEditorGroups.test.ts __tests__/dailyEntryPane.test.ts",
+			"problemMatcher": []
+		},
+		{
+			"label": "Validate interface fixes",
+			"type": "shell",
+			"command": "& 'C:\\Program Files\\nodejs\\node.exe' .\\node_modules\\jest\\bin\\jest.js --ci --silent; & 'C:\\Program Files\\nodejs\\node.exe' .\\node_modules\\typescript\\bin\\tsc --noEmit",
+			"problemMatcher": []
+		},
+		{
+			"label": "Typecheck interface fixes",
+			"type": "shell",
+			"command": "& 'C:\\Program Files\\nodejs\\node.exe' .\\node_modules\\typescript\\bin\\tsc --noEmit",
+			"problemMatcher": []
+		}
+	]
+}

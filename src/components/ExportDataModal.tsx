@@ -1,20 +1,14 @@
 import { Check, X } from 'lucide-react-native';
 import { useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Modal,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import {
   createTransferArchives,
   createTransferBundle,
 } from '../lib/dataTransfer';
 import { saveTransferArchives } from '../lib/dataTransferFile';
-import { colors } from '../theme/tokens';
+import { colors, typeScale } from '../theme/tokens';
+import { AppButton } from './AppButton';
 import { SystemScreen } from './SystemScreen';
 import type {
   ExportLayout,
@@ -260,20 +254,13 @@ export const ExportDataModal = ({
           </View>
           {error ? <Text style={styles.error}>{error}</Text> : null}
         </KeyboardAwareScrollView>
-        <Pressable
-          accessibilityRole="button"
+        <AppButton
+          size="utility"
+          title={busy ? 'Exporting' : 'Export'}
           disabled={!hasSelection || busy}
+          loading={busy}
           onPress={exportData}
-          style={[
-            styles.primaryButton,
-            (!hasSelection || busy) && styles.primaryButtonDisabled,
-          ]}
-        >
-          {busy ? <ActivityIndicator color="#fff" /> : null}
-          <Text style={styles.primaryButtonText}>
-            {busy ? 'Exporting' : 'Export'}
-          </Text>
-        </Pressable>
+        />
       </SystemScreen>
     </Modal>
   );
@@ -289,7 +276,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
   },
   headerCopy: { flex: 1 },
-  title: { color: colors.text, fontSize: 23, fontWeight: '700' },
+  title: {
+    color: colors.text,
+    fontSize: typeScale.screenTitle,
+    fontWeight: '700',
+  },
   subtitle: { color: colors.muted, fontSize: 13, marginTop: 3 },
   iconButton: {
     alignItems: 'center',
@@ -348,21 +339,6 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
   },
   segmentText: { color: colors.text, fontSize: 13, fontWeight: '700' },
-  segmentTextActive: { color: '#fff' },
+  segmentTextActive: { color: colors.onPrimary },
   error: { color: colors.danger, fontSize: 13, lineHeight: 18 },
-  primaryButton: {
-    alignItems: 'center',
-    alignSelf: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 7,
-    flexDirection: 'row',
-    gap: 8,
-    justifyContent: 'center',
-    marginBottom: 24,
-    maxWidth: 520,
-    minHeight: 46,
-    width: '90%',
-  },
-  primaryButtonDisabled: { opacity: 0.45 },
-  primaryButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 });

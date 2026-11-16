@@ -22,17 +22,42 @@ export const formatHumanDate = (date: Date): string =>
     year: 'numeric',
   }).format(date);
 
-export const formatHumanDateTime = (date: Date, is24Hour = true): string =>
-  new Intl.DateTimeFormat(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: !is24Hour,
-  }).format(date);
+export interface TimeOfDay {
+  hours: number;
+  minutes: number;
+  seconds: number;
+  milliseconds: number;
+}
+
+const TIME_PATTERN =
+  /^\s*(\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?(?:[.,](\d{1,3}))?\s*(?:([ap])\.?\s*m?\.?)?\s*$/i;
+
+// Tolerant of partial/unpadded input ("9", "9:5", "9:05:0 p") but strict about ranges, so callers
+// can flag a bad value instead of silently coercing it while the user is still typing.
+export const parseTimeOfDay = (
+  value: string,
+  options: { is24Hour?: boolean; fallbackMeridiem?: 'AM' | 'PM' } = {},
+): TimeOfDay | null => {
+  const match = TIME_PATTERN.exec(value);
+  if (!match) return null;
+  let hours = Number(match[1]);
+  const minutes = Number(match[2] ?? 0);
+  const seconds = Number(match[3] ?? 0);
+  const milliseconds = Number((match[4] ?? '0').padEnd(3, '0'));
+  if (minutes > 59 || seconds > 59) return null;
+  const typedMeridiem = match[5]
+    ? match[5].toUpperCase() === 'P'
+      ? 'PM'
+      : 'AM'
+    : undefined;
+  const meridiem =
+    typedMeridiem ?? (options.is24Hour ? undefined : options.fallbackMeridiem);
+  if (meridiem) {
+    if (hours < 1 || hours > 12) return null;
+    hours = (hours % 12) + (meridiem === 'PM' ? 12 : 0);
+  } else if (hours > 23) return null;
+  return { hours, minutes, seconds, milliseconds };
+};
 
 // Whole-calendar-day difference between two local dates (ignoring time-of-day), e.g. for
 // "stop time crossed into the next day" offset labels.

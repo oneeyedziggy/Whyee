@@ -1,4 +1,5 @@
 import { Download, Upload, X } from 'lucide-react-native';
+import { useState, type ReactNode } from 'react';
 import {
   Modal,
   Platform,
@@ -7,7 +8,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { colors } from '../theme/tokens';
+import { colors, typeScale } from '../theme/tokens';
 import { SystemScreen } from './SystemScreen';
 
 interface SettingsDrawerProps {
@@ -16,6 +17,27 @@ interface SettingsDrawerProps {
   onExport: () => void;
   onImport: () => void;
 }
+
+const ActionRow = ({
+  onPress,
+  children,
+}: {
+  onPress: () => void;
+  children: ReactNode;
+}) => {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onHoverIn={Platform.OS === 'web' ? () => setHovered(true) : undefined}
+      onHoverOut={Platform.OS === 'web' ? () => setHovered(false) : undefined}
+      onPress={onPress}
+      style={[styles.action, hovered && styles.actionHovered]}
+    >
+      {children}
+    </Pressable>
+  );
+};
 
 export const SettingsDrawer = ({
   visible,
@@ -30,7 +52,7 @@ export const SettingsDrawer = ({
     animationType="fade"
     onRequestClose={onClose}
   >
-    <SystemScreen style={styles.root}>
+    <SystemScreen backgroundColor="transparent" style={styles.root}>
       <Pressable
         accessibilityLabel="Close settings"
         accessibilityRole="button"
@@ -49,11 +71,7 @@ export const SettingsDrawer = ({
             <X color={colors.text} size={21} />
           </Pressable>
         </View>
-        <Pressable
-          accessibilityRole="button"
-          onPress={onExport}
-          style={styles.action}
-        >
+        <ActionRow onPress={onExport}>
           <Download color={colors.primary} size={21} />
           <View style={styles.actionCopy}>
             <Text style={styles.actionTitle}>Export data</Text>
@@ -61,12 +79,8 @@ export const SettingsDrawer = ({
               Save selected workspaces and settings.
             </Text>
           </View>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          onPress={onImport}
-          style={styles.action}
-        >
+        </ActionRow>
+        <ActionRow onPress={onImport}>
           <Upload color={colors.teal} size={21} />
           <View style={styles.actionCopy}>
             <Text style={styles.actionTitle}>Import data</Text>
@@ -74,7 +88,7 @@ export const SettingsDrawer = ({
               Restore or merge a Whyee export.
             </Text>
           </View>
-        </Pressable>
+        </ActionRow>
       </View>
     </SystemScreen>
   </Modal>
@@ -97,7 +111,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 20,
   },
-  title: { color: colors.text, fontSize: 23, fontWeight: '700' },
+  title: {
+    color: colors.text,
+    fontSize: typeScale.screenTitle,
+    fontWeight: '700',
+  },
   iconButton: {
     alignItems: 'center',
     height: 40,
@@ -114,6 +132,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingVertical: 16,
   },
+  actionHovered: { backgroundColor: colors.primarySoft },
   actionCopy: { flex: 1 },
   actionTitle: { color: colors.text, fontSize: 16, fontWeight: '700' },
   actionDescription: { color: colors.muted, fontSize: 12, marginTop: 3 },

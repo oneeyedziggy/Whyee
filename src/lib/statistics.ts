@@ -2,7 +2,6 @@ export type StatisticsSectionId =
   | 'chart'
   | 'summary'
   | 'correlation'
-  | 'weekly'
   | 'virtual-series'
   | 'calendar';
 
@@ -18,12 +17,8 @@ export type StatisticsItemId =
   | 'summary.slope.all'
   | 'summary.slope.recent'
   | 'summary.autocorrelation'
-  | 'summary.weekly-effect'
-  | 'summary.weekly-phase'
-  | 'summary.weekly-offset'
   | 'correlation.section'
   | 'correlation.top-matches'
-  | 'weekly.section'
   | 'virtual-series.section'
   | 'calendar.section';
 
@@ -36,7 +31,6 @@ export interface StatisticsItemDefinition {
   documentationSection:
     | 'statistics'
     | 'correlation'
-    | 'weekly-effects'
     | 'virtual-series';
 }
 
@@ -103,30 +97,13 @@ export const statisticsRegistry: StatisticsItemDefinition[] = [
       'Autocorrelation',
       'Correlation between a series and its configured forward offset.',
     ],
-    [
-      'weekly-effect',
-      'Weekly effect score',
-      'Strength of the category weekly cycle.',
-    ],
-    [
-      'weekly-phase',
-      'Weekly phase weekday',
-      'Weekday phase associated with the strongest weekly effect.',
-    ],
-    [
-      'weekly-offset',
-      'Strongest weekly offset',
-      'Forward offset where the weekly effect is strongest.',
-    ],
   ].map(([suffix, label, description]) => ({
     id: `summary.${suffix}` as StatisticsItemId,
     section: 'summary' as StatisticsSectionId,
     label,
     description,
-    defaultEnabled: !suffix.startsWith('weekly'),
-    documentationSection: suffix.startsWith('weekly')
-      ? ('weekly-effects' as const)
-      : ('statistics' as const),
+    defaultEnabled: true,
+    documentationSection: 'statistics' as const,
   })),
   {
     id: 'correlation.section',
@@ -144,14 +121,6 @@ export const statisticsRegistry: StatisticsItemDefinition[] = [
       'List the strongest lagged correlations above a threshold, independent of the full matrix.',
     defaultEnabled: true,
     documentationSection: 'correlation',
-  },
-  {
-    id: 'weekly.section',
-    section: 'weekly',
-    label: 'Weekly effects',
-    description: 'Show weekly cyclic diagnostics when categories opt in.',
-    defaultEnabled: false,
-    documentationSection: 'weekly-effects',
   },
   {
     id: 'virtual-series.section',
