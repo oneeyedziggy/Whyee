@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from 'react';
+import { memo, type ComponentProps, type ReactNode } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 import type { GestureResponderHandlers, ViewStyle } from 'react-native';
 import { useDragReorder } from '../hooks/useDragReorder';
@@ -109,7 +109,7 @@ const DraggableRow = memo(
     registerHeight: (key: string, position: number, height: number) => void;
     panHandlers: GestureResponderHandlers;
     heldWrapperStyle: ViewStyle;
-    heldRowStyle: Animated.WithAnimatedObject<ViewStyle>;
+    heldRowStyle: ComponentProps<typeof Animated.View>['style'];
   }) => (
     <View
       onLayout={(event) =>

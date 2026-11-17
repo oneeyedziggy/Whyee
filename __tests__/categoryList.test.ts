@@ -142,10 +142,10 @@ describe('DraggableCategoryList', () => {
     expect(screen.getByText('2 categories')).toBeTruthy();
     expect(screen.getByText(/^Disabled · /)).toBeTruthy();
     expect(rowStyle(screen, 'A1')).toMatchObject(
-      StyleSheet.flatten([styles.categorySelected, styles.categoryDragging]),
+      StyleSheet.flatten([styles.categorySelected, styles.categoryDragging])!,
     );
     expect(rowStyle(screen, 'B1')).not.toMatchObject(
-      StyleSheet.flatten(styles.categoryDragging),
+      StyleSheet.flatten(styles.categoryDragging)!,
     );
     const heights = [0, 1, 99].map((index) =>
       mockList.props!.fallbackHeightFor(index),

@@ -29,9 +29,9 @@ const rntlComponentSuites = listTestFiles(path.join(__dirname, '__tests__'))
   )
   .map((file) => `${escapeRegExp(path.relative(__dirname, file).split(path.sep).join('/'))}$`);
 
-// watchPlugins is only valid in the root config, so it is hoisted out of each project.
+// watchPlugins and passWithNoTests are only valid in the root config, so they are hoisted out of each project.
 const withProjectDefaults = (
-  { watchPlugins: _watchPlugins, ...preset },
+  { watchPlugins: _watchPlugins, passWithNoTests: _passWithNoTests, ...preset },
   platformExtensions,
   ignoredTests = [],
 ) => ({

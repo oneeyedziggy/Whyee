@@ -24,7 +24,7 @@ jest.mock('expo-file-system', () => {
     create = jest.fn(() => {
       this.exists = true;
     });
-    write = jest.fn((bytes: Uint8Array) => {
+    write = jest.fn(async (bytes: Uint8Array) => {
       this.written = bytes;
     });
     delete = jest.fn(() => {

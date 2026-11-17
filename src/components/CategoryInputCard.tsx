@@ -70,7 +70,12 @@ export const CategoryInputCard = ({
       {category.allowMultiplePerDay && !splitOwnsNewEntry ? (
         <Pressable
           accessibilityLabel={`Add ${category.name} entry`}
-          onPress={() => onAddEntry()}
+          onPress={() => {
+            // With no saved records the first block is an unsaved placeholder; materialize
+            // it as entry #1 so this press visibly adds a second set of inputs.
+            if (!entries.length) onAddEntry();
+            onAddEntry();
+          }}
           style={styles.addEntry}
         >
           <Text style={styles.addEntryText}>+</Text>

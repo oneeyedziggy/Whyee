@@ -8,6 +8,7 @@ import {
   View,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  type ScrollViewInstance,
 } from 'react-native';
 import { colors } from '../theme/tokens';
 
@@ -34,7 +35,7 @@ export const WorkspacePicker = ({
   onManage,
 }: WorkspacePickerProps) => {
   const [track, setTrack] = useState({ viewport: 0, content: 0, offset: 0 });
-  const [scroller, setScroller] = useState<ScrollView | null>(null);
+  const [scroller, setScroller] = useState<ScrollViewInstance | null>(null);
   const maxOffset = Math.max(0, track.content - track.viewport);
   const overflowing = maxOffset > EDGE_SLACK;
   const atStart = track.offset <= EDGE_SLACK;

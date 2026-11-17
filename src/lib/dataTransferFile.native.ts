@@ -24,13 +24,13 @@ export const pickTransferFile =
     };
   };
 
-const writeArchives = (
+const writeArchives = async (
   directory: Directory,
   archives: TransferArchive[],
-): void => {
+): Promise<void> => {
   for (const archive of archives) {
     const file = directory.createFile(archive.fileName, archive.mimeType);
-    file.write(archive.bytes);
+    await file.write(archive.bytes);
   }
 };
 
@@ -40,7 +40,7 @@ export const saveTransferArchives = async (
   if (!archives.length) throw new Error('There are no files to export.');
   if (Platform.OS === 'android') {
     const directory = await Directory.pickDirectoryAsync();
-    writeArchives(directory, archives);
+    await writeArchives(directory, archives);
     return;
   }
 
@@ -50,7 +50,7 @@ export const saveTransferArchives = async (
   for (const archive of archives) {
     const file = new File(Paths.cache, archive.fileName);
     file.create({ overwrite: true });
-    file.write(archive.bytes);
+    await file.write(archive.bytes);
     try {
       await Sharing.shareAsync(file.uri, {
         mimeType: archive.mimeType,

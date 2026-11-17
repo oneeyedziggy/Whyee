@@ -8,6 +8,7 @@ import {
   Text,
   View,
   type StyleProp,
+  type ViewInstance,
   type ViewStyle,
 } from 'react-native';
 import { colors } from '../theme/tokens';
@@ -49,7 +50,7 @@ export const ContextMenu = ({
 }) => {
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<Anchor | null>(null);
-  const triggerRef = useRef<View>(null);
+  const triggerRef = useRef<ViewInstance>(null);
   const close = () => setOpen(false);
 
   useEffect(() => {

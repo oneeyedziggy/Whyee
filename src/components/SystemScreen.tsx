@@ -1,6 +1,5 @@
 import type { PropsWithChildren } from 'react';
 import {
-  Platform,
   StatusBar,
   StyleSheet,
   View,
@@ -38,11 +37,7 @@ export const SystemScreen = ({
 
   return (
     <View style={[styles.root, { backgroundColor }]}>
-      <StatusBar
-        barStyle="dark-content"
-        backgroundColor={backgroundColor}
-        translucent={Platform.OS === 'android'}
-      />
+      <StatusBar barStyle="dark-content" />
       <SafeAreaView
         accessibilityViewIsModal={accessibilityViewIsModal}
         edges={edges}

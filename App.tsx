@@ -15,9 +15,11 @@ import {
   Text,
   useWindowDimensions,
   View,
+  type ScrollViewInstance,
+  type ViewInstance,
 } from 'react-native';
 import Animated from 'react-native-reanimated';
-import { GestureDetector } from 'react-native-gesture-handler';
+import { GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { CategoryEditor } from './src/components/CategoryEditor';
 import { KeyboardProvider } from './src/components/KeyboardProvider';
@@ -375,15 +377,15 @@ const App = () => {
       statisticsSettings,
     ],
   );
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   const scrollOffset = useRef(0);
-  const categoryAnchors = useRef<Record<string, View | null>>({});
+  const categoryAnchors = useRef<Record<string, ViewInstance | null>>({});
   const scrollToCategory = (categoryId: string) => {
     const anchor = categoryAnchors.current[categoryId];
     const scroller = scrollRef.current;
     if (!anchor || !scroller) return;
     anchor.measureInWindow((_x, anchorY) => {
-      (scroller as unknown as View).measureInWindow((_scrollX, scrollY) => {
+      scroller.measureInWindow((_scrollX, scrollY) => {
         scrollRef.current?.scrollTo({
           y: Math.max(0, scrollOffset.current + anchorY - scrollY - 8),
           animated: true,
@@ -1085,7 +1087,8 @@ const App = () => {
     );
 
   return (
-    <KeyboardProvider>
+    <GestureHandlerRootView style={styles.gestureRoot}>
+      <KeyboardProvider>
       <SafeAreaProvider>
         <SafeAreaView style={styles.root}>
           <StatusBar style="dark" />
@@ -1108,7 +1111,9 @@ const App = () => {
                       accessibilityRole="button"
                       onPress={() => setDatePickerOpen(true)}
                     >
-                      <Text style={styles.date}>{selectedDateLabel}</Text>
+                      <Text numberOfLines={1} style={styles.date}>
+                        {selectedDateLabel}
+                      </Text>
                     </Pressable>
                     <Pressable
                       accessibilityLabel="Next day"
@@ -1140,6 +1145,7 @@ const App = () => {
                   <InfoLink
                     section="categories"
                     label="Open category and tracker documentation"
+                    style={styles.headerInfoButton}
                   />
                   <Pressable
                     accessibilityLabel="Open settings"
@@ -1300,7 +1306,8 @@ const App = () => {
           <ConfirmDialog />
         </SafeAreaView>
       </SafeAreaProvider>
-    </KeyboardProvider>
+      </KeyboardProvider>
+    </GestureHandlerRootView>
   );
 };
 

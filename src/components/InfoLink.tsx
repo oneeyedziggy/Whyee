@@ -2,18 +2,26 @@ import { useState } from 'react';
 import { DocumentationModal } from './DocumentationModal';
 import type { DocumentationSectionId } from '../lib/documentation';
 import { colors } from '../theme/tokens';
-import { Pressable, StyleSheet, Text } from 'react-native';
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 
 interface InfoLinkProps {
   section: DocumentationSectionId;
   label?: string;
   compact?: boolean;
+  style?: StyleProp<ViewStyle>;
 }
 
 export const InfoLink = ({
   section,
   label = 'More information',
   compact = false,
+  style,
 }: InfoLinkProps) => {
   const [visible, setVisible] = useState(false);
   return (
@@ -22,7 +30,7 @@ export const InfoLink = ({
         accessibilityLabel={label}
         accessibilityRole="button"
         onPress={() => setVisible(true)}
-        style={[styles.button, compact && styles.buttonCompact]}
+        style={[styles.button, compact && styles.buttonCompact, style]}
       >
         <Text style={styles.icon}>i</Text>
       </Pressable>

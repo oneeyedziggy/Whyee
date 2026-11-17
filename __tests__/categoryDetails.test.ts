@@ -390,10 +390,10 @@ describe('CategoryDetails editing', () => {
       const style = (label: string) =>
         StyleSheet.flatten(screen.getByLabelText(label).parent?.props.style);
       expect(style('Reorder Option 2')).toMatchObject(
-        StyleSheet.flatten(styles.categoryDragging),
+        StyleSheet.flatten(styles.categoryDragging)!,
       );
       expect(style('Reorder Option 1')).not.toMatchObject(
-        StyleSheet.flatten(styles.categoryDragging),
+        StyleSheet.flatten(styles.categoryDragging)!,
       );
     } finally {
       mockDraggable.heldIndex = undefined;

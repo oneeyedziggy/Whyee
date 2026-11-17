@@ -34,7 +34,6 @@ const sectionTitles: Record<StatisticsSectionId, string> = {
   chart: 'Chart',
   summary: 'Category statistics',
   correlation: 'Correlation matrix',
-  weekly: 'Weekly effects',
   'virtual-series': 'Virtual-series detail',
   calendar: 'Calendar statistics',
 };
@@ -161,7 +160,7 @@ export const StatisticsSettings = ({
                       {isExpanded ? '−' : '+'} {sectionTitles[section]}
                     </Text>
                     <InfoLink
-                      section={items[0]?.documentationSection ?? 'statistics'}
+                      section={items[0].documentationSection}
                       label={`More information about ${sectionTitles[section]}`}
                     />
                   </Pressable>

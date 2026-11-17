@@ -301,7 +301,7 @@ describe('CategoryInputCard entries and choices', () => {
     await fireEvent(option('Option 3'), 'layout', layout(110));
     expect(containerStyle().flexDirection).toBe('column');
     expect(StyleSheet.flatten(option('Option 1').props.style)).toMatchObject(
-      StyleSheet.flatten(styles.optionStacked),
+      StyleSheet.flatten(styles.optionStacked)!,
     );
     // Stacked rows are full width, so their layouts no longer feed the measurement.
     await fireEvent(option('Option 3'), 'layout', layout(10));
@@ -369,6 +369,7 @@ describe('CategoryInputCard entries and choices', () => {
     ];
     const { screen, props } = await card(category, entries);
     await fireEvent.press(screen.getByLabelText('Add Energy entry'));
+    expect(props.onAddEntry).toHaveBeenCalledTimes(1);
     expect(props.onAddEntry).toHaveBeenCalledWith();
 
     await fireEvent.press(screen.getAllByText('Remove entry')[1]);
@@ -380,6 +381,16 @@ describe('CategoryInputCard entries and choices', () => {
     expect(props.onDeleteEntry).not.toHaveBeenCalled();
     confirmRequests[0].onConfirm();
     expect(props.onDeleteEntry).toHaveBeenCalledWith(entries[1]);
+  });
+
+  it('counts the unsaved placeholder as the first entry when adding with none saved', async () => {
+    const category = {
+      ...createDefaultCategory('number', 0, 'Energy'),
+      allowMultiplePerDay: true,
+    } as CategoryDefinition;
+    const { screen, props } = await card(category, []);
+    await fireEvent.press(screen.getByLabelText('Add Energy entry'));
+    expect(props.onAddEntry).toHaveBeenCalledTimes(2);
   });
 
   it('tolerates a missing delete handler', async () => {
