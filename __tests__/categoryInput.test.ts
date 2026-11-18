@@ -64,6 +64,64 @@ const renderCard = async (
     }),
   );
 
+describe('event-time input', () => {
+  it('logs the current wall-clock time for a new entry', async () => {
+    const category = createDefaultCategory('event-time', 0);
+    const onChange = jest.fn();
+    const screen = await renderCard(category, [], onChange);
+
+    await fireEvent.press(screen.getByLabelText(`Log ${category.name} now`));
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dateKey,
+        value: 0,
+        localTime: expect.stringMatching(/^\d{2}:\d{2}:\d{2}$/),
+      }),
+    );
+  });
+
+  it('edits the stored time and re-stamps it with Now', async () => {
+    const category = createDefaultCategory('event-time', 0);
+    const onChange = jest.fn();
+    const screen = await renderCard(
+      category,
+      [makeEntry(category.id)],
+      onChange,
+    );
+
+    await fireEvent.changeText(screen.getByDisplayValue('09:00:00'), '10:15');
+    await fireEvent(screen.getByDisplayValue('10:15'), 'submitEditing');
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ localTime: '10:15:00', dateKey }),
+    );
+
+    await fireEvent.press(
+      screen.getByLabelText(`Set ${category.name} time to now`),
+    );
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        localTime: expect.stringMatching(/^\d{2}:\d{2}:\d{2}$/),
+      }),
+    );
+  });
+
+  it('falls back to an editable field when the stored time is unreadable', async () => {
+    const category = createDefaultCategory('event-time', 0);
+    if (category.kind !== 'event-time') throw new Error('expected event');
+    const twelveHour = {
+      ...category,
+      eventTime: { ...category.eventTime, use24HourClock: false },
+    };
+    const screen = await renderCard(
+      twelveHour,
+      [makeEntry(category.id, { localTime: 'bogus' })],
+      jest.fn(),
+    );
+    expect(screen.getByPlaceholderText('HH:MM:SS AM/PM')).toBeTruthy();
+  });
+});
+
 describe('CategoryInputCard write-back', () => {
   it('applies the whole configured counter step to the stored value', async () => {
     const category = createDefaultCategory('counter', 0);

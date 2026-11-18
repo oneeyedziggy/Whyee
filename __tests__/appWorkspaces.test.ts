@@ -7,6 +7,7 @@ import { ExportDataModal } from '../src/components/ExportDataModal';
 import { WorkspaceManagerModal } from '../src/components/WorkspaceManagerModal';
 import { WorkspacePicker } from '../src/components/WorkspacePicker';
 import { createDefaultCategory, recomputeVirtualSeries } from '../src/lib/category';
+import { createDefaultWorkspaceData } from '../src/lib/defaultCategories';
 import { createDefaultGroup } from '../src/lib/groups';
 import { persistentStatePrefix } from '../src/hooks/usePersistentState';
 
@@ -186,7 +187,9 @@ it('does not seed even a reserved workspace name in production', async () => {
       expect((await storage('recordsByWorkspace.v1')).testdata).toEqual({});
     });
     const categories = (await storage('categoriesByWorkspace.v1')).testdata;
-    expect(categories.map((category: { name: string }) => category.name)).toEqual(['Mood', 'Energy']);
+    expect(categories.map((category: { name: string }) => category.name)).toEqual(
+      createDefaultWorkspaceData().categories.map((category) => category.name),
+    );
     expect((await storage('recordsByWorkspace.v1')).test).toEqual(savedRecords);
   } finally {
     Object.defineProperty(globalThis, '__DEV__', { value: development, configurable: true, writable: true });

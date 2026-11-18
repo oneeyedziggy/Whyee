@@ -429,7 +429,167 @@ describe('GroupDetails', () => {
     expanded: true,
   };
 
-  it('renames, toggles, and deletes an enabled group', async () => {
+  describe('event-time editor', () => {
+  const { measureInWindow } = jest.requireActual(
+    '@react-native/jest-preset/jest/MockNativeMethods',
+  ).default as { measureInWindow: jest.Mock };
+  beforeEach(() =>
+    measureInWindow.mockImplementation(
+      (callback: (x: number, y: number, w: number, h: number) => void) =>
+        callback(0, 0, 20, 20),
+    ),
+  );
+  afterEach(() => measureInWindow.mockReset());
+  const pain = (): CategoryDefinition => ({
+    ...createDefaultCategory('event-time', 0, 'Pain'),
+    id: 'pain',
+  });
+  const source = (id: string, name: string): CategoryDefinition => ({
+    ...createDefaultCategory('event-time', 1, name),
+    id,
+  });
+  const renderWith = (
+    self: CategoryDefinition,
+    others: CategoryDefinition[],
+    onUpdate: jest.Mock,
+  ) =>
+    render(
+      React.createElement(CategoryDetails, {
+        category: self,
+        categories: [self, ...others],
+        onUpdate,
+        onDelete: jest.fn(),
+        onDragChange: jest.fn(),
+      }),
+    );
+
+  it('switches a category to the event type', async () => {
+    const onUpdate = jest.fn();
+    const screen = await renderDetails(reading(), onUpdate);
+    await fireEvent.press(screen.getByLabelText('Event'));
+    expect(onUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'reading', kind: 'event-time' }),
+    );
+  });
+
+  it('prompts for sources when no other categories exist', async () => {
+    const screen = await renderDetails(pain(), jest.fn());
+    expect(
+      screen.getByText(
+        'Add another category to measure time since its entries.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('toggles the clock and adds a time-since source from the dropdown, excluding itself', async () => {
+    const onUpdate = jest.fn();
+    const screen = await renderWith(pain(), [source('meals', 'Meals')], onUpdate);
+
+    await fireEvent.press(screen.getByLabelText('Use 24-hour clock'));
+    expect(onUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventTime: expect.objectContaining({ use24HourClock: false }),
+      }),
+    );
+
+    await fireEvent.press(screen.getByLabelText('Add time-since source'));
+    // The menu offers other categories but never the category itself.
+    expect(screen.queryByLabelText('Pain')).toBeNull();
+    await fireEvent.press(screen.getByLabelText('Meals'));
+    const added = onUpdate.mock.calls[onUpdate.mock.calls.length - 1][0];
+    expect(added.eventTime.timeSinceCategoryIds).toEqual(['meals']);
+    expect(
+      added.virtualSeries.some(
+        (series: { id: string; name: string }) =>
+          series.id === 'pain:since:meals' &&
+          series.name === 'Pain minutes since Meals',
+      ),
+    ).toBe(true);
+  });
+
+  it('replaces a row source from its dropdown, offering only unclaimed categories', async () => {
+    const base = pain();
+    if (base.kind !== 'event-time') throw new Error('expected event');
+    const self: CategoryDefinition = {
+      ...base,
+      eventTime: {
+        use24HourClock: true,
+        timeSinceCategoryIds: ['meals', 'sleep'],
+      },
+    };
+    const onUpdate = jest.fn();
+    const screen = await renderWith(
+      self,
+      [source('meals', 'Meals'), source('sleep', 'Sleep'), source('water', 'Water')],
+      onUpdate,
+    );
+
+    await fireEvent.press(screen.getByLabelText('Time-since source Meals'));
+    // A category claimed by another row is excluded; the row's own selection stays listed.
+    expect(screen.queryByLabelText('Sleep')).toBeNull();
+    expect(screen.getByLabelText('Meals')).toBeTruthy();
+    await fireEvent.press(screen.getByLabelText('Water'));
+    const replaced = onUpdate.mock.calls[onUpdate.mock.calls.length - 1][0];
+    expect(replaced.eventTime.timeSinceCategoryIds).toEqual(['water', 'sleep']);
+  });
+
+  it('removes a selected source and labels dangling references', async () => {
+    const base = pain();
+    if (base.kind !== 'event-time') throw new Error('expected event');
+    const self: CategoryDefinition = {
+      ...base,
+      eventTime: { use24HourClock: true, timeSinceCategoryIds: ['meals', 'ghost'] },
+    };
+    const onUpdate = jest.fn();
+    const screen = await renderWith(self, [source('meals', 'Meals')], onUpdate);
+
+    // A reference to a deleted category still renders with a placeholder label.
+    expect(screen.getByText('Missing category')).toBeTruthy();
+
+    await fireEvent.press(screen.getByLabelText('Remove time-since source Meals'));
+    const removed = onUpdate.mock.calls[0][0];
+    expect(removed.eventTime.timeSinceCategoryIds).toEqual(['ghost']);
+    expect(
+      removed.virtualSeries.some(
+        (series: { id: string }) => series.id === 'pain:since:meals',
+      ),
+    ).toBe(false);
+  });
+
+  it('hides the add trigger once every category is claimed', async () => {
+    const base = pain();
+    if (base.kind !== 'event-time') throw new Error('expected event');
+    const self: CategoryDefinition = {
+      ...base,
+      eventTime: { use24HourClock: true, timeSinceCategoryIds: ['meals'] },
+    };
+    const screen = await renderWith(self, [source('meals', 'Meals')], jest.fn());
+    expect(screen.queryByLabelText('Add time-since source')).toBeNull();
+  });
+
+  it('adds time-since sources to duration categories', async () => {
+    const timer: CategoryDefinition = {
+      ...createDefaultCategory('duration', 0, 'Timer'),
+      id: 'timer',
+    };
+    const onUpdate = jest.fn();
+    const screen = await renderWith(timer, [source('meals', 'Meals')], onUpdate);
+
+    await fireEvent.press(screen.getByLabelText('Add time-since source'));
+    await fireEvent.press(screen.getByLabelText('Meals'));
+    const added = onUpdate.mock.calls[onUpdate.mock.calls.length - 1][0];
+    expect(added.duration.timeSinceCategoryIds).toEqual(['meals']);
+    expect(
+      added.virtualSeries.some(
+        (series: { id: string; name: string }) =>
+          series.id === 'timer:since:meals' &&
+          series.name === 'Timer minutes since Meals',
+      ),
+    ).toBe(true);
+  });
+});
+
+it('renames, toggles, and deletes an enabled group', async () => {
     const onUpdate = jest.fn();
     const onToggleEnabled = jest.fn();
     const onDelete = jest.fn();

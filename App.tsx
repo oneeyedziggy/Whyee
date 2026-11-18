@@ -39,6 +39,7 @@ import {
   getNextCategoryNameSequence,
   recomputeVirtualSeries,
 } from './src/lib/category';
+import { createDefaultWorkspaceData } from './src/lib/defaultCategories';
 import {
   createDefaultGroup,
   isGroupEnabled,
@@ -95,11 +96,6 @@ import type {
 
 const createOffsets = (maximum: number): number[] =>
   Array.from({ length: maximum + 1 }, (_, index) => index);
-
-const initialCategories = (): CategoryDefinition[] => [
-  createDefaultCategory('multiple-choice', 0, 'Mood', 1),
-  createDefaultCategory('number', 1, 'Energy', 1),
-];
 
 const App = () => {
   const { width } = useWindowDimensions();
@@ -259,6 +255,8 @@ const App = () => {
                     resetEnabled: category.duration.resetEnabled ?? true,
                     cumulative: category.duration.cumulative ?? false,
                     animate: category.duration.animate ?? true,
+                    timeSinceCategoryIds:
+                      category.duration.timeSinceCategoryIds ?? [],
                   },
                 }
               : {}),
@@ -488,22 +486,22 @@ const App = () => {
           : undefined,
       );
     }
-    const seedCategories = dataset?.categories ?? initialCategories();
+    const seed = dataset ?? { ...createDefaultWorkspaceData(), records: {} };
     setWorkspaceList((current) => [
       ...current,
       { id, name, notes, hidden: false },
     ]);
     setCategoriesByWorkspace((current) => ({
       ...current,
-      [id]: seedCategories,
+      [id]: seed.categories,
     }));
     setGroupsByWorkspace((current) => ({
       ...current,
-      [id]: dataset?.groups ?? [createDefaultGroup(seedCategories)],
+      [id]: seed.groups ?? [createDefaultGroup(seed.categories)],
     }));
     setRecordsByWorkspace((current) => ({
       ...current,
-      [id]: dataset?.records ?? {},
+      [id]: seed.records,
     }));
     setActiveWorkspaceId(id);
   };
@@ -605,12 +603,16 @@ const App = () => {
       }
     };
     (async () => {
-      const legacyUserCategories =
-        (await readLegacy<CategoryDefinition[]>('categories.v4')) ??
-        initialCategories();
-      const legacyUserGroups = (await readLegacy<CategoryGroup[]>(
-        'groups.v4',
-      )) ?? [createDefaultGroup(legacyUserCategories)];
+      const defaults = createDefaultWorkspaceData();
+      const storedUserCategories = await readLegacy<CategoryDefinition[]>(
+        'categories.v4',
+      );
+      const legacyUserCategories = storedUserCategories ?? defaults.categories;
+      const legacyUserGroups =
+        (await readLegacy<CategoryGroup[]>('groups.v4')) ??
+        (storedUserCategories
+          ? [createDefaultGroup(legacyUserCategories)]
+          : defaults.groups);
       const legacyUserRecords =
         (await readLegacy<Record<string, CategorySelectionRecord>>(
           'records.v4',
@@ -716,31 +718,104 @@ const App = () => {
   };
   const restoreDefaults = () => {
     if (activeWorkspaceId !== 'user') return;
-    const defaultCategories = initialCategories();
-    const missingDefaults = defaultCategories.filter(
+    const defaults = createDefaultWorkspaceData();
+    const missingDefaults = defaults.categories.filter(
       (category) =>
         !categories.some((existing) => existing.name === category.name),
     );
     if (!missingDefaults.length) return;
-    setCategories((current) => {
-      return [...current, ...missingDefaults];
+    // Time-since references point at freshly generated ids; swap in the ids of same-named
+    // categories that already exist and drop references that resolve to nothing.
+    const nameToExistingId = new Map(
+      categories.map((category) => [category.name, category.id]),
+    );
+    const defaultsById = new Map(
+      defaults.categories.map((category) => [category.id, category]),
+    );
+    const resolveSourceId = (id: string): string => {
+      const source = defaultsById.get(id);
+      return (source && nameToExistingId.get(source.name)) ?? id;
+    };
+    const resolveSourceIds = (ids: string[]): string[] =>
+      ids
+        .map(resolveSourceId)
+        .filter(
+          (id) =>
+            missingDefaults.some((candidate) => candidate.id === id) ||
+            categories.some((candidate) => candidate.id === id),
+        );
+    const relinkTimeSince = (
+      category: CategoryDefinition,
+    ): CategoryDefinition => {
+      if (
+        category.kind === 'event-time' &&
+        category.eventTime.timeSinceCategoryIds.length
+      )
+        return {
+          ...category,
+          eventTime: {
+            ...category.eventTime,
+            timeSinceCategoryIds: resolveSourceIds(
+              category.eventTime.timeSinceCategoryIds,
+            ),
+          },
+        };
+      if (
+        category.kind === 'duration' &&
+        category.duration.timeSinceCategoryIds.length
+      )
+        return {
+          ...category,
+          duration: {
+            ...category.duration,
+            timeSinceCategoryIds: resolveSourceIds(
+              category.duration.timeSinceCategoryIds,
+            ),
+          },
+        };
+      return category;
+    };
+    const added = missingDefaults.map((category) => {
+      const next = relinkTimeSince(category);
+      if (next === category) return category;
+      return {
+        ...next,
+        virtualSeries: recomputeVirtualSeries(next, [
+          ...categories,
+          ...missingDefaults,
+        ]),
+      };
     });
+    setCategories((current) => [...current, ...added]);
     setGroups((current) => {
-      const defaultGroup =
-        current.find((group) => group.id === 'default-group') ?? current[0];
-      if (!defaultGroup) return [createDefaultGroup(defaultCategories)];
-      const missing = missingDefaults.map((category) => category.id);
-      return current.map((group) =>
-        group.id === defaultGroup.id
-          ? {
-              ...group,
-              categoryIds: [
-                ...group.categoryIds,
-                ...missing.filter((id) => !group.categoryIds.includes(id)),
-              ],
-            }
-          : group,
-      );
+      // Normalize first so pre-existing unassigned categories keep their default group
+      // instead of being folded into the first restored group later.
+      let next = normalizeGroups(current, categories);
+      for (const defaultGroup of defaults.groups) {
+        const memberIds = defaultGroup.categoryIds.filter((id) =>
+          added.some((category) => category.id === id),
+        );
+        if (!memberIds.length) continue;
+        const existing = next.find(
+          (candidate) => candidate.name === defaultGroup.name,
+        );
+        next = existing
+          ? next.map((candidate) =>
+              candidate.id === existing.id
+                ? {
+                    ...candidate,
+                    categoryIds: [
+                      ...candidate.categoryIds,
+                      ...memberIds.filter(
+                        (id) => !candidate.categoryIds.includes(id),
+                      ),
+                    ],
+                  }
+                : candidate,
+            )
+          : [...next, { ...defaultGroup, categoryIds: memberIds }];
+      }
+      return next;
     });
   };
   const deleteGroup = (groupId: string) => {

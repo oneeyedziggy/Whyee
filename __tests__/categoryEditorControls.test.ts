@@ -21,6 +21,9 @@ describe('getCategorySummary', () => {
       'Start and stop timer',
     );
     expect(getCategorySummary(createDefaultCategory('notes', 0))).toBe('Notes only');
+    expect(getCategorySummary(createDefaultCategory('event-time', 0))).toBe(
+      'Time of event',
+    );
     expect(getCategorySummary(counter)).toBe(
       `${counter.kind === 'counter' ? counter.counter.steps.length : 0} counter steps`,
     );

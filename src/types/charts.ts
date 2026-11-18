@@ -23,6 +23,8 @@ export interface ChartSeries {
   raw: boolean;
   durationValue?: boolean;
   showMilliseconds?: boolean;
+  timeOfDayValue?: boolean;
+  use24HourClock?: boolean;
   points: ChartPoint[];
 }
 

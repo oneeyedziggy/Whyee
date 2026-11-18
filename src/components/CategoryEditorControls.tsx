@@ -34,6 +34,7 @@ export const getCategorySummary = (category: CategoryDefinition): string => {
     return `${category.range.min} to ${category.range.max}`;
   if (category.kind === 'duration') return 'Start and stop timer';
   if (category.kind === 'notes') return 'Notes only';
+  if (category.kind === 'event-time') return 'Time of event';
   return `${category.counter.steps.length} counter steps`;
 };
 

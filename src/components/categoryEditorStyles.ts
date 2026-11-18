@@ -233,5 +233,14 @@ export const styles = StyleSheet.create({
   numeric: { marginTop: 4 },
   numericRow: { flexDirection: 'row', gap: 8 },
   numericField: { flex: 1 },
+  timeSinceTrigger: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  timeSinceTriggerText: { color: colors.text, fontSize: 14 },
+  timeSinceChevron: { color: colors.muted, fontSize: 12, marginLeft: 8 },
+  timeSinceAddText: { color: colors.primary, fontSize: 13, fontWeight: '700' },
   delete: { marginTop: 14 },
 });

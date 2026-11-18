@@ -4,6 +4,7 @@ export type DocumentationSectionId =
   | 'virtual-series'
   | 'duration'
   | 'counter'
+  | 'event-time'
   | 'notes'
   | 'weekly-effects'
   | 'correlation'
@@ -28,7 +29,7 @@ export const documentationSections: DocumentationSection[] = [
     id: 'categories',
     title: 'Categories',
     summary: 'Categories describe the things you track.',
-    body: 'A category can be a single choice, a multi-select choice, a number, a duration, a counter, or notes-only. Category settings define what can be entered and which derived series are available for statistics.',
+    body: 'A category can be a single choice, a multi-select choice, a number, a duration, a counter, notes-only, or an event time. Category settings define what can be entered and which derived series are available for statistics.',
     keywords: [
       'category',
       'choice',
@@ -37,6 +38,7 @@ export const documentationSections: DocumentationSection[] = [
       'duration',
       'counter',
       'notes',
+      'event',
     ],
   },
   {
@@ -113,7 +115,7 @@ export const documentationSections: DocumentationSection[] = [
     id: 'duration',
     title: 'Duration tracking',
     summary: 'Measure elapsed time with start and stop controls.',
-    body: 'Start begins a live timer and disables Start until the duration is stopped or reset. Stop stores editable start and stop times. Split ends the current instance and immediately starts another. Cumulative mode preserves a run history and reports its summed duration.',
+    body: 'Start begins a live timer and disables Start until the duration is stopped or reset. Stop stores editable start and stop times. Split ends the current instance and immediately starts another. Cumulative mode preserves a run history and reports its summed duration. A duration entry is treated as happening at its first start time, and durations can add time-since series that measure the minutes from each recorded period back to the most recent prior entry in selected source categories.',
     keywords: [
       'duration',
       'timer',
@@ -131,6 +133,21 @@ export const documentationSections: DocumentationSection[] = [
     summary: 'Track increments, decrements, and independent counter instances.',
     body: 'Counter step buttons can use any configured values, such as -10, -5, -1, +1, +5, and +10. Reset requires confirmation. Direct editing and split/lap behavior are optional settings.',
     keywords: ['counter', 'step', 'increment', 'decrement', 'reset'],
+  },
+  {
+    id: 'event-time',
+    title: 'Event times',
+    summary: 'Log the clock time something happens.',
+    body: "An event-time category's datum is the time of day of each entry. Log now stamps the current time, which stays editable afterwards. Derived series include the minute of day, four daypart indicators (night, morning, afternoon, evening), a single hourly-breakdown toggle that correlates one 0/1 series per hour of day, a per-day count, and time-since series that measure the minutes from the most recent prior entry in each selected source category, searching back without a day limit. Duration sources count each recorded period's start as an entry.",
+    keywords: [
+      'event',
+      'time',
+      'timestamp',
+      'daypart',
+      'hour',
+      'minute',
+      'time since',
+    ],
   },
   {
     id: 'notes',

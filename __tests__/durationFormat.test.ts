@@ -3,7 +3,28 @@ import {
   formatClockTime,
   formatDuration,
   formatDurationValue,
+  formatMinutesOfDay,
 } from '../src/lib/durationFormat';
+
+describe('formatMinutesOfDay', () => {
+  it('renders minute-of-day values as 24-hour clock times', () => {
+    expect(formatMinutesOfDay(0)).toBe('00:00');
+    expect(formatMinutesOfDay(570)).toBe('09:30');
+    expect(formatMinutesOfDay(1439)).toBe('23:59');
+  });
+
+  it('rounds fractional minutes and wraps at midnight in both directions', () => {
+    expect(formatMinutesOfDay(569.6)).toBe('09:30');
+    expect(formatMinutesOfDay(1500)).toBe('01:00');
+    expect(formatMinutesOfDay(-60)).toBe('23:00');
+  });
+
+  it('renders 12-hour clock times with AM/PM', () => {
+    expect(formatMinutesOfDay(0, false)).toBe('12:00 AM');
+    expect(formatMinutesOfDay(750, false)).toBe('12:30 PM');
+    expect(formatMinutesOfDay(1050, false)).toBe('05:30 PM');
+  });
+});
 
 describe('formatDurationValue', () => {
   it('omits the days portion below 24 hours', () => {

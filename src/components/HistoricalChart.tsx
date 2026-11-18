@@ -10,7 +10,7 @@ import {
 import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
 import type { ChartSeries } from '../types/charts';
 import { colors, shadows } from '../theme/tokens';
-import { formatDurationValue } from '../lib/durationFormat';
+import { formatDurationValue, formatMinutesOfDay } from '../lib/durationFormat';
 
 const minimumWidth = 560;
 const height = 260;
@@ -238,7 +238,12 @@ export const HistoricalChart = ({ series }: { series: ChartSeries[] }) => {
                         point.value!,
                         item.showMilliseconds ?? false,
                       )
-                    : point.value?.toFixed(2)}
+                    : item.timeOfDayValue
+                      ? formatMinutesOfDay(
+                          point.value!,
+                          item.use24HourClock !== false,
+                        )
+                      : point.value?.toFixed(2)}
                   {item.raw
                     ? ` (${new Date(point.timestamp).toLocaleTimeString()})`
                     : ''}

@@ -216,6 +216,7 @@ describe('notificationService (native) with expo-notifications available', () =>
       ],
       ['number text input', { kind: 'number' }, ['Enter']],
       ['notes text input', { kind: 'notes' }, ['Enter']],
+      ['event-time log action', { kind: 'event-time' }, ['Log now']],
       ['multi-select choice (no actions)', { kind: 'multiple-choice', multiSelect: true, options: [] }, []],
       ['duration (no actions)', { kind: 'duration' }, []],
     ])('registers %s', async (_label, overrides, titles) => {

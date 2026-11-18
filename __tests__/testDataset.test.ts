@@ -28,6 +28,7 @@ describe('development test workspace datasets', () => {
     ['testDuration', 'duration'],
     ['testCounter', 'counter'],
     ['testNotes', 'notes'],
+    ['testEvent', 'event-time'],
   ])('%s has complete typed history, repeated entries, gaps, and constant/lagged cases', (name, kind) => {
     const dataset = createTestWorkspaceDataset(name)!;
     expect(dataset).toEqual(createTestWorkspaceDataset(name));
@@ -76,6 +77,20 @@ describe('development test workspace datasets', () => {
     expect(notes.some((entry) => entry.noteText!.length > 1000)).toBe(true);
     expect(notes.some((entry) => entry.sentimentScore! < 0)).toBe(true);
     expect(notes.some((entry) => entry.sentimentScore! > 0)).toBe(true);
+  });
+
+  it('encodes event dataset values as the recorded time of day', () => {
+    const dataset = createTestWorkspaceDataset('testEvent')!;
+    for (const entry of Object.values(dataset.records)) {
+      expect(entry.localTime).toMatch(/^\d{2}:\d{2}:00$/);
+      expect(Number(entry.localTime.slice(0, 2))).toBe(6 + entry.value * 3);
+    }
+    const multiple = dataset.categories.find(
+      (category) => category.id === 'test-event-time-multiple',
+    )!;
+    expect(
+      multiple.kind === 'event-time' && multiple.eventTime.use24HourClock,
+    ).toBe(false);
   });
 
   it('showcases two distinct modes of every category type with history', () => {

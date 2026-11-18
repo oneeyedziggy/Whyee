@@ -241,7 +241,10 @@ export const DurationInput = ({
     setNow(Date.now());
     setNotice('');
     patchEntry({
-      localTime: entry?.localTime ?? getLocalTimeStamp(startedAt),
+      // Banked runs pin the entry's time to the first run; otherwise it follows this start.
+      ...(entry?.durationRuns?.length
+        ? {}
+        : { localTime: getLocalTimeStamp(startedAt) }),
       startTime: startedAt.toISOString(),
       stopTime: undefined,
     });
@@ -281,7 +284,11 @@ export const DurationInput = ({
   };
   const split = () => {
     stop();
-    onAddEntry?.({ startTime: nowOnDateKey(dateKey).toISOString() });
+    const splitStart = nowOnDateKey(dateKey);
+    onAddEntry?.({
+      startTime: splitStart.toISOString(),
+      localTime: getLocalTimeStamp(splitStart),
+    });
   };
   const bankedMs = (entry?.durationRuns ?? []).reduce(
     (sum, run) => sum + run.durationMs,

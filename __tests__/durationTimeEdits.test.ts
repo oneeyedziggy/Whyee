@@ -597,7 +597,10 @@ describe('DurationInput controls and guards', () => {
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ key: running.key, stopTime: expect.any(String) }),
     );
-    expect(onAddEntry).toHaveBeenCalledWith({ startTime: expect.any(String) });
+    expect(onAddEntry).toHaveBeenCalledWith({
+      startTime: expect.any(String),
+      localTime: expect.stringMatching(/^\d{2}:\d{2}:\d{2}$/),
+    });
 
     const blocked = await renderInput(
       { entry: running, blocked: true },

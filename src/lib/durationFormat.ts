@@ -53,5 +53,18 @@ export const formatClockTime = (
   return is24Hour ? withMs : `${withMs} ${hours < 12 ? 'AM' : 'PM'}`;
 };
 
+// Time-of-day read-out for minute-of-day series values; wraps at midnight, rounds to minutes.
+export const formatMinutesOfDay = (
+  minutesOfDay: number,
+  is24Hour = true,
+): string => {
+  const total = ((Math.round(minutesOfDay) % 1440) + 1440) % 1440;
+  const hours = Math.floor(total / 60);
+  const minutes = total % 60;
+  const displayHours = is24Hour ? hours : hours % 12 === 0 ? 12 : hours % 12;
+  const base = `${pad(displayHours)}:${pad(minutes)}`;
+  return is24Hour ? base : `${base} ${hours < 12 ? 'AM' : 'PM'}`;
+};
+
 export const entryDurationMs = (entry: CategorySelectionRecord): number =>
   entry.durationMsExact ?? entry.durationMs ?? 0;

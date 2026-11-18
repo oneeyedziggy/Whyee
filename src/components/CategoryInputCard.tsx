@@ -2,17 +2,19 @@ import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { confirmAction } from '../lib/confirm';
-import { makeRecordKey } from '../lib/dates';
+import { getLocalTimeStamp, makeRecordKey } from '../lib/dates';
 import { buildEntry } from '../lib/entries';
 import { colors } from '../theme/tokens';
 import type {
   CategoryDefinition,
   CategorySelectionRecord,
+  EventTimeCategory,
 } from '../types/category';
 import { styles } from './categoryInputStyles';
 import { CounterInput } from './CounterInput';
 import { DurationInput } from './DurationInput';
 import { NoteField } from './NoteField';
+import { TimeEditor } from './TimeEditor';
 
 interface CategoryInputCardProps {
   category: CategoryDefinition;
@@ -164,6 +166,15 @@ const DailyEntry = ({
           });
         }}
       />
+    ) : category.kind === 'event-time' ? (
+      <EventTimeInput
+        category={category}
+        entry={entry}
+        onStamp={() => patchEntry({ localTime: getLocalTimeStamp() })}
+        onChangeTime={(value) =>
+          patchEntry({ localTime: getLocalTimeStamp(value) })
+        }
+      />
     ) : (
       <NumberInput
         category={category}
@@ -210,6 +221,58 @@ const DailyEntry = ({
         </Pressable>
       ) : null}
     </View>
+  );
+};
+
+// The event's datum is the entry timestamp itself: logging stamps the current wall-clock time
+// and the editor rewrites the record's localTime while keeping its date.
+const EventTimeInput = ({
+  category,
+  entry,
+  onStamp,
+  onChangeTime,
+}: {
+  category: EventTimeCategory;
+  entry: CategorySelectionRecord | null;
+  onStamp: () => void;
+  onChangeTime: (value: Date) => void;
+}) => {
+  if (!entry)
+    return (
+      <View style={styles.durationButtons}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Log ${category.name} now`}
+          onPress={onStamp}
+          style={styles.actionButton}
+        >
+          <Text style={styles.actionText}>Log now</Text>
+        </Pressable>
+      </View>
+    );
+  const timestamp = `${entry.dateKey}T${entry.localTime}`;
+  return (
+    <TimeEditor
+      label="Time"
+      timestamp={Number.isFinite(Date.parse(timestamp)) ? timestamp : undefined}
+      showMilliseconds={false}
+      is24Hour={category.eventTime.use24HourClock}
+      allowRollover={false}
+      onChange={onChangeTime}
+      // Without min/max bounds a same-day commit cannot be rejected.
+      onReject={() => undefined}
+      rejectMessage="Enter a valid time of day."
+      trailing={
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Set ${category.name} time to now`}
+          onPress={onStamp}
+          style={styles.actionButton}
+        >
+          <Text style={styles.actionText}>Now</Text>
+        </Pressable>
+      }
+    />
   );
 };
 

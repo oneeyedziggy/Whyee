@@ -59,6 +59,35 @@ export const parseTimeOfDay = (
   return { hours, minutes, seconds, milliseconds };
 };
 
+// Whole minutes since local midnight for a record's HH:MM[:SS] localTime; null when unparseable.
+export const minutesOfDayFromTimeStamp = (
+  value: string | undefined,
+): number | null => {
+  if (!value) return null;
+  const time = parseTimeOfDay(value, { is24Hour: true });
+  if (!time) return null;
+  return time.hours * 60 + time.minutes;
+};
+
+// Absolute local epoch milliseconds for a record's dateKey + localTime pair; null when either
+// part is unparseable.
+export const localRecordTimestampMs = (
+  dateKey: string,
+  localTime: string | undefined,
+): number | null => {
+  const dayStart = Date.parse(`${dateKey}T00:00:00`);
+  if (!Number.isFinite(dayStart)) return null;
+  const time = localTime ? parseTimeOfDay(localTime, { is24Hour: true }) : null;
+  if (!time) return null;
+  return (
+    dayStart +
+    time.hours * 3600000 +
+    time.minutes * 60000 +
+    time.seconds * 1000 +
+    time.milliseconds
+  );
+};
+
 // Whole-calendar-day difference between two local dates (ignoring time-of-day), e.g. for
 // "stop time crossed into the next day" offset labels.
 export const calendarDayDiff = (from: Date, to: Date): number => {

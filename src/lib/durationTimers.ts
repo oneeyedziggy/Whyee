@@ -2,7 +2,7 @@ import type {
   CategoryDefinition,
   CategorySelectionRecord,
 } from '../types/category';
-import { getLocalDateKey } from './dates';
+import { getLocalDateKey, getLocalTimeStamp } from './dates';
 
 export interface DurationInterval {
   startTime: string;
@@ -90,6 +90,19 @@ export const getDurationIntervals = (
   ];
 };
 
+// A duration entry "happens" at its first period's start, so the record's localTime datum
+// (used by time-since sources, charts, and summaries) follows that timestamp.
+export const syncLocalTimeToStart = (
+  record: CategorySelectionRecord,
+): CategorySelectionRecord => {
+  const firstStart = parsedTime(
+    record.durationRuns?.[0]?.startTime ?? record.startTime,
+  );
+  if (firstStart === null) return record;
+  const localTime = getLocalTimeStamp(new Date(firstStart));
+  return record.localTime === localTime ? record : { ...record, localTime };
+};
+
 const withDurationTotal = (
   record: CategorySelectionRecord,
   durationRuns: DurationInterval[],
@@ -97,13 +110,13 @@ const withDurationTotal = (
 ): CategorySelectionRecord => {
   const exact = durationRuns.reduce((sum, run) => sum + run.durationMs, 0);
   const stored = applyDurationPrecision(exact, showMilliseconds);
-  return {
+  return syncLocalTimeToStart({
     ...record,
     durationRuns,
     durationMsExact: exact,
     durationMs: stored,
     value: stored,
-  };
+  });
 };
 
 export const stopDurationRecord = (
@@ -183,7 +196,7 @@ export const editDurationStartTime = (
   if (!completed.length) {
     const stopMs = parsedTime(record.stopTime);
     if (stopMs !== null && stopMs < startMs) return null;
-    return { ...record, startTime };
+    return syncLocalTimeToStart({ ...record, startTime });
   }
   const firstStopMs = Date.parse(completed[0].stopTime);
   if (firstStopMs < startMs) return null;

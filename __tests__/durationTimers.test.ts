@@ -13,6 +13,7 @@ import {
   resumeDurationRecord,
   splitIntervalHoursByLocalDate,
   stopDurationRecord,
+  syncLocalTimeToStart,
 } from '../src/lib/durationTimers';
 import { createDefaultCategory } from '../src/lib/category';
 import type { CategorySelectionRecord } from '../src/types/category';
@@ -30,6 +31,34 @@ const makeRecord = (
 });
 
 describe('duration timer helpers', () => {
+  it('keeps localTime matched to the first period start across stop and edits', () => {
+    const localStart = (hour: number, minute = 0) =>
+      new Date(2026, 2, 1, hour, minute);
+    const started = makeRecord({ startTime: localStart(9, 30).toISOString() });
+    const stopped = stopDurationRecord(started, localStart(10), false);
+    expect(stopped?.localTime).toBe('09:30:00');
+
+    const editedWithRuns = editDurationStartTime(
+      stopped!,
+      localStart(8, 15),
+      false,
+    );
+    expect(editedWithRuns?.localTime).toBe('08:15:00');
+
+    // Editing the start of a not-yet-stopped record also moves the stamp.
+    const bare = makeRecord({ startTime: localStart(9).toISOString() });
+    const edited = editDurationStartTime(bare, localStart(7, 5), false);
+    expect(edited?.localTime).toBe('07:05:00');
+
+    // Records without a parseable start, or already in sync, pass through unchanged.
+    const unparseable = makeRecord({ startTime: 'bogus' });
+    expect(syncLocalTimeToStart(unparseable)).toBe(unparseable);
+    const synced = makeRecord({
+      localTime: '09:00:00',
+      startTime: localStart(9).toISOString(),
+    });
+    expect(syncLocalTimeToStart(synced)).toBe(synced);
+  });
   it.each([
     ['without a gap', '2026-03-02T00:30:00.000Z'],
     ['with a gap', '2026-03-02T02:00:00.000Z'],

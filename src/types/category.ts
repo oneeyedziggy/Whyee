@@ -3,7 +3,8 @@ export type CategoryKind =
   | 'number'
   | 'duration'
   | 'counter'
-  | 'notes';
+  | 'notes'
+  | 'event-time';
 
 export type SummaryVerb =
   | 'count'
@@ -24,7 +25,11 @@ export type VirtualSeriesField =
   | 'noteWordCount'
   | 'noteLength'
   | 'noteAverageWordLength'
-  | 'noteDistinctWords';
+  | 'noteDistinctWords'
+  | 'eventMinuteOfDay'
+  | 'eventHourOfDay'
+  | 'eventDaypart'
+  | 'timeSinceCategory';
 
 // 'inverse' only appears on legacy standalone series; current series use `inverseEnabled`.
 export type VirtualSeriesTransform = 'sentimentScore' | 'inverse';
@@ -42,7 +47,11 @@ export interface VirtualSeriesDefinition {
   transform?: VirtualSeriesTransform;
   perInstance?: boolean;
   // Only set (and used) when field is 'optionSelected'; the ChoiceOption value this series tracks.
+  // For 'eventHourOfDay' it is the hour (0-23) and for 'eventDaypart' the daypart index (0-3).
   optionValue?: number;
+  // Only set (and used) when field is 'timeSinceCategory'; the category whose latest prior entry
+  // this series measures the elapsed minutes from.
+  timeSinceCategoryId?: string;
 }
 
 export interface ChoiceOption {
@@ -134,6 +143,9 @@ export interface DurationCategory extends BaseCategory {
     animate: boolean;
     // true (default) shows 24h clock times; false shows 12h times with AM/PM.
     use24HourClock: boolean;
+    // Source categories whose latest prior entry each recorded period measures elapsed
+    // minutes from (anchored at the period's start time).
+    timeSinceCategoryIds: string[];
   };
 }
 
@@ -152,12 +164,23 @@ export interface NotesCategory extends BaseCategory {
   notes: { sentimentEnabled: boolean };
 }
 
+export interface EventTimeCategory extends BaseCategory {
+  kind: 'event-time';
+  eventTime: {
+    // true (default) shows 24h clock times; false shows 12h times with AM/PM.
+    use24HourClock: boolean;
+    // Source categories whose latest prior entry each event measures elapsed minutes from.
+    timeSinceCategoryIds: string[];
+  };
+}
+
 export type CategoryDefinition =
   | ChoiceCategory
   | NumericCategory
   | DurationCategory
   | CounterCategory
-  | NotesCategory;
+  | NotesCategory
+  | EventTimeCategory;
 
 export interface CategorySelectionRecord {
   key: string;

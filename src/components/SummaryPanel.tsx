@@ -13,7 +13,8 @@ import {
   mode,
   slope,
 } from '../lib/summaryStats';
-import { formatDurationValue } from '../lib/durationFormat';
+import { formatDurationValue, formatMinutesOfDay } from '../lib/durationFormat';
+import { minutesOfDayFromTimeStamp } from '../lib/dates';
 import {
   compareValues,
   nextSortDirection,
@@ -41,6 +42,17 @@ const durationStatIds = new Set<string>([
   'summary.slope.recent',
 ]);
 
+// Location-style stats that read as a time of day for event categories; trends like slope and
+// autocorrelation stay numeric.
+const timeOfDayStatIds = new Set<string>([
+  'summary.mean.all',
+  'summary.mean.recent',
+  'summary.median.all',
+  'summary.median.recent',
+  'summary.mode.all',
+  'summary.mode.recent',
+]);
+
 const formatStat = (
   category: CategoryDefinition,
   id: string,
@@ -49,6 +61,8 @@ const formatStat = (
   if (value === null) return '--';
   if (category.kind === 'duration' && durationStatIds.has(id))
     return formatDurationValue(value, category.duration.showMilliseconds);
+  if (category.kind === 'event-time' && timeOfDayStatIds.has(id))
+    return formatMinutesOfDay(value, category.eventTime.use24HourClock);
   return value.toFixed(2);
 };
 
@@ -84,15 +98,23 @@ export const SummaryPanel = ({
         const categoryRecords = Object.values(records)
           .filter((record) => record.categoryId === category.id)
           .sort((left, right) => left.dateKey.localeCompare(right.dateKey));
+        // An event's observed numeric value is its time of day, not the stored 0.
+        const observed = (record: CategorySelectionRecord): number | null =>
+          category.kind === 'event-time'
+            ? minutesOfDayFromTimeStamp(record.localTime)
+            : record.value;
         const values = needsAllTimeValues
-          ? categoryRecords.map((record) => record.value)
+          ? categoryRecords
+              .map(observed)
+              .filter((value): value is number => value !== null)
           : [];
         const recentValues = needsRecentValues
           ? categoryRecords
               .filter(
                 (record) => daysAgo(record.dateKey, new Date()) < recentDays,
               )
-              .map((record) => record.value)
+              .map(observed)
+              .filter((value): value is number => value !== null)
           : [];
         return { category, values, recentValues };
       }),

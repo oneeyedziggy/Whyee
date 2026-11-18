@@ -49,11 +49,33 @@ const noteMetrics: Array<[VirtualSeriesField, string, string]> = [
   ['noteDistinctWords', 'distinct-words', 'distinct word count'],
 ];
 
+// Daypart index = floor(hour / 6); names and labels are indexed by that bucket.
+export const eventDaypartNames = [
+  'Night',
+  'Morning',
+  'Afternoon',
+  'Evening',
+] as const;
+const eventDaypartLabels = [
+  'at night',
+  'in the morning',
+  'in the afternoon',
+  'in the evening',
+];
+
 // Split / lap modes record several entries per day even when the setting itself is off.
 export const allowsMultiplePerDay = (category: CategoryDefinition): boolean =>
   category.allowMultiplePerDay ||
   (category.kind === 'duration' && category.duration.splitEnabled) ||
   (category.kind === 'counter' && category.counter.splitEnabled);
+
+// Time-since source category ids for the kinds that support them.
+export const timeSinceSourceIds = (category: CategoryDefinition): string[] =>
+  category.kind === 'event-time'
+    ? category.eventTime.timeSinceCategoryIds
+    : category.kind === 'duration'
+      ? category.duration.timeSinceCategoryIds
+      : [];
 
 const primaryStat = (
   category: CategoryDefinition,
@@ -88,6 +110,10 @@ export const primarySeriesId = (
     return multiple
       ? `${id}:duration:${primaryStat(category, durationStats)}`
       : `${id}:duration`;
+  if (category.kind === 'event-time')
+    return multiple
+      ? `${id}:time:${primaryStat(category, timeStats)}`
+      : `${id}:time`;
   return multiple
     ? `${id}:value:${primaryStat(category, valueStats)}`
     : `${id}:value`;
@@ -100,6 +126,7 @@ interface GeneratedSeries {
 
 const generateVirtualSeries = (
   category: CategoryDefinition,
+  sourceNames?: Map<string, string>,
 ): GeneratedSeries[] => {
   const { id, name } = category;
   const multiple = allowsMultiplePerDay(category);
@@ -141,6 +168,31 @@ const generateVirtualSeries = (
       `${id}:counter:count`,
       `${id}:durationMs:count`,
     ]);
+  };
+  // "Minutes since <source>" series, shared by the event-time and duration kinds.
+  const addTimeSince = () => {
+    for (const sourceId of timeSinceSourceIds(category)) {
+      const label = `minutes since ${sourceNames?.get(sourceId) ?? 'source'}`;
+      if (!multiple)
+        add(`since:${sourceId}`, label, 'timeSinceCategory', 'mean', {
+          timeSinceCategoryId: sourceId,
+          enabled: true,
+          group: 'Time since',
+        });
+      else
+        for (const stat of timeStats)
+          add(
+            `since:${sourceId}:${stat}`,
+            `${stat} ${label}`,
+            'timeSinceCategory',
+            stat,
+            {
+              timeSinceCategoryId: sourceId,
+              enabled: stat === 'mean',
+              group: 'Time since',
+            },
+          );
+    }
   };
 
   if (
@@ -207,6 +259,33 @@ const generateVirtualSeries = (
         }
       }
     }
+    addTimeSince();
+  } else if (category.kind === 'event-time') {
+    if (!multiple) add('time', 'time', 'eventMinuteOfDay', 'mean', {});
+    else {
+      add('instance', 'time per entry', 'eventMinuteOfDay', 'mean', {
+        perInstance: true,
+        group: 'Entries',
+      });
+      add('count', 'count', 'eventMinuteOfDay', 'count', {
+        group: 'Entries',
+        enabled: true,
+      });
+      for (const stat of timeStats)
+        add(`time:${stat}`, `${timeLabels[stat]} time`, 'eventMinuteOfDay', stat, {
+          group: statGroups[stat],
+        });
+    }
+    eventDaypartNames.forEach((daypart, index) =>
+      add(`daypart:${index}`, eventDaypartLabels[index], 'eventDaypart', 'max', {
+        optionValue: index,
+        enabled: true,
+        group: 'Dayparts',
+      }),
+    );
+    // One toggle that fans out into 24 hourly 0/1 series (see expandVirtualSeries).
+    add('hours', 'hourly breakdown', 'eventHourOfDay', 'max', {});
+    addTimeSince();
   } else if (category.kind !== 'notes') {
     if (!multiple)
       add('value', 'value', 'value', 'mean', { name }, [
@@ -290,9 +369,14 @@ export const getVirtualSeriesAliases = (
   );
 
 // Rebuilds the canonical series list for the current config, keeping prior enabled flags.
+// `allCategories` resolves time-since source names; without it, prior names are preserved.
 export const recomputeVirtualSeries = (
   category: CategoryDefinition,
+  allCategories?: CategoryDefinition[],
 ): VirtualSeriesDefinition[] => {
+  const sourceNames = allCategories
+    ? new Map(allCategories.map((entry) => [entry.id, entry.name]))
+    : undefined;
   const previous = new Map(
     category.virtualSeries.map((definition) => [definition.id, definition]),
   );
@@ -302,21 +386,26 @@ export const recomputeVirtualSeries = (
       definition.transform === 'inverse' && definition.enabled !== false,
   );
   const primary = primarySeriesId(category);
-  return generateVirtualSeries(category).map(({ definition, aliases }) => {
-    const prior = [definition.id, ...aliases]
-      .map((candidate) => previous.get(candidate))
-      .find((candidate) => candidate !== undefined);
-    const inverseEnabled =
-      prior?.inverseEnabled ?? (legacyInverse && definition.id === primary);
-    const { inverseEnabled: ignored, ...rest } = definition;
-    return {
-      ...rest,
-      enabled: prior
-        ? prior.enabled !== false
-        : definition.enabled === true || definition.id === primary,
-      ...(inverseEnabled ? { inverseEnabled: true } : {}),
-    };
-  });
+  return generateVirtualSeries(category, sourceNames).map(
+    ({ definition, aliases }) => {
+      const prior = [definition.id, ...aliases]
+        .map((candidate) => previous.get(candidate))
+        .find((candidate) => candidate !== undefined);
+      const inverseEnabled =
+        prior?.inverseEnabled ?? (legacyInverse && definition.id === primary);
+      const { inverseEnabled: ignored, ...rest } = definition;
+      return {
+        ...rest,
+        ...(definition.field === 'timeSinceCategory' && !sourceNames && prior
+          ? { name: prior.name }
+          : {}),
+        enabled: prior
+          ? prior.enabled !== false
+          : definition.enabled === true || definition.id === primary,
+        ...(inverseEnabled ? { inverseEnabled: true } : {}),
+      };
+    },
+  );
 };
 
 export const createChoiceOption = (index: number): ChoiceOption => ({
@@ -372,7 +461,9 @@ const createCategoryShape = (
           ? 'Duration'
           : kind === 'counter'
             ? 'Counter'
-            : 'Notes';
+            : kind === 'event-time'
+              ? 'Event'
+              : 'Notes';
   const baseName = name ?? `${defaultName} ${index + 1}`;
 
   if (kind === 'multiple-choice') {
@@ -419,6 +510,7 @@ const createCategoryShape = (
         cumulative: false,
         animate: true,
         use24HourClock: true,
+        timeSinceCategoryIds: [],
       },
       virtualSeries: [],
     };
@@ -459,6 +551,22 @@ const createCategoryShape = (
       correlateWithinGroup: false,
       allowMultiplePerDay: false,
       notes: { sentimentEnabled: true },
+      virtualSeries: [],
+    };
+  }
+
+  if (kind === 'event-time') {
+    return {
+      id: createId('category'),
+      name: baseName,
+      nameSequence,
+      kind,
+      allowMultiplePerDay: false,
+      enabled: true,
+      notesEnabled: false,
+      sentimentEnabled: true,
+      correlateWithinGroup: false,
+      eventTime: { use24HourClock: true, timeSinceCategoryIds: [] },
       virtualSeries: [],
     };
   }
@@ -561,6 +669,7 @@ const switchKindShape = (
         cumulative: false,
         animate: true,
         use24HourClock: true,
+        timeSinceCategoryIds: [],
       },
       virtualSeries: category.virtualSeries,
     };
@@ -600,6 +709,22 @@ const switchKindShape = (
       allowMultiplePerDay: category.allowMultiplePerDay,
       notes: { sentimentEnabled: true },
       virtualSeries: [],
+    };
+  }
+
+  if (kind === 'event-time') {
+    return {
+      id: category.id,
+      name: category.name,
+      nameSequence: category.nameSequence,
+      kind,
+      enabled: category.enabled,
+      notesEnabled: category.notesEnabled,
+      sentimentEnabled: category.sentimentEnabled,
+      correlateWithinGroup: category.correlateWithinGroup,
+      allowMultiplePerDay: category.allowMultiplePerDay,
+      eventTime: { use24HourClock: true, timeSinceCategoryIds: [] },
+      virtualSeries: category.virtualSeries,
     };
   }
 

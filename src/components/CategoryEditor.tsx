@@ -175,6 +175,7 @@ export const CategoryEditor = ({
             {selected && !selectedGroup ? (
               <CategoryDetails
                 category={selected}
+                categories={categories}
                 entryCount={entryCounts?.[selected.id] ?? 0}
                 onUpdate={onUpdate}
                 onDelete={() => onDelete(selected.id)}

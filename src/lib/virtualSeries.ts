@@ -7,6 +7,7 @@ import type {
 import type { CorrelationRequest } from '../types/correlation';
 import type { CategoryGroup } from '../types/category';
 import { recomputeVirtualSeries } from './category';
+import { localRecordTimestampMs, minutesOfDayFromTimeStamp } from './dates';
 import { scoreSentiment } from './sentiment';
 
 const noteWords = (text: string) =>
@@ -49,6 +50,16 @@ export const numericValue = (
     return noteMetric(record.noteText, field);
   if (field === 'optionSelected')
     return record.selectedValues?.includes(optionValue as number) ? 1 : 0;
+  if (field === 'eventMinuteOfDay')
+    return minutesOfDayFromTimeStamp(record.localTime);
+  if (field === 'eventHourOfDay' || field === 'eventDaypart') {
+    const minutes = minutesOfDayFromTimeStamp(record.localTime);
+    if (minutes === null) return null;
+    const bucket = Math.floor(minutes / (field === 'eventDaypart' ? 360 : 60));
+    return bucket === optionValue ? 1 : 0;
+  }
+  // Needs the source category's records; computed via timeSinceMinutes instead.
+  if (field === 'timeSinceCategory') return null;
   if (field === 'durationMs') return record.durationMs ?? null;
   const timestamp = field === 'startTime' ? record.startTime : record.stopTime;
   if (!timestamp) return null;
@@ -82,6 +93,75 @@ export const summarize = (
   }
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 };
+
+// Ascending absolute timestamps for a source category's records, for time-since lookups.
+// Duration records contribute each recorded period's start; other records their entry time.
+export const sortedEventTimestamps = (
+  records: CategorySelectionRecord[],
+): number[] =>
+  records
+    .flatMap((record) => recordAnchorsMs(record))
+    .sort((left, right) => left - right);
+
+// Latest source timestamp at or before the anchor, as elapsed minutes; null when the anchor
+// precedes every source entry (searching back without limit).
+const minutesSinceLatestSource = (
+  anchorMs: number,
+  sortedSourceMs: number[],
+): number | null => {
+  let low = 0;
+  let high = sortedSourceMs.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (sortedSourceMs[mid] <= anchorMs) low = mid + 1;
+    else high = mid;
+  }
+  return low === 0 ? null : (anchorMs - sortedSourceMs[low - 1]) / 60000;
+};
+
+// Time-since anchors for a record: one per recorded duration period (each run's start, or the
+// record's start time), falling back to the record's own local entry time.
+const recordAnchorsMs = (record: CategorySelectionRecord): number[] => {
+  const periodStarts = (
+    record.durationRuns?.length
+      ? record.durationRuns.map((run) => run.startTime)
+      : record.startTime
+        ? [record.startTime]
+        : []
+  )
+    .map((startTime) => Date.parse(startTime))
+    .filter((value) => Number.isFinite(value));
+  if (periodStarts.length) return periodStarts;
+  const fallback = localRecordTimestampMs(record.dateKey, record.localTime);
+  return fallback === null ? [] : [fallback];
+};
+
+// Minutes between each of a record's anchors and the most recent source timestamp at or
+// before it; anchors that predate every source entry are omitted.
+export const timeSinceMinutes = (
+  record: CategorySelectionRecord,
+  sortedSourceMs: number[],
+): number[] =>
+  recordAnchorsMs(record).flatMap((anchorMs) => {
+    const minutes = minutesSinceLatestSource(anchorMs, sortedSourceMs);
+    return minutes === null ? [] : [minutes];
+  });
+
+// A compact hourly-breakdown definition (eventHourOfDay with no optionValue) fans out into
+// one 0/1 series per hour of day; every other definition passes through unchanged.
+export const expandVirtualSeries = (
+  definition: VirtualSeriesDefinition,
+): VirtualSeriesDefinition[] =>
+  definition.field === 'eventHourOfDay' && definition.optionValue === undefined
+    ? Array.from({ length: 24 }, (unused, hour) => ({
+        ...definition,
+        id: `${definition.id}:${hour}`,
+        name: `${definition.name.replace(/\s*hourly breakdown$/, '')} at ${String(
+          hour,
+        ).padStart(2, '0')}:00`,
+        optionValue: hour,
+      }))
+    : [definition];
 
 const calendarSeries = [
   { id: 'calendar:weekday', name: 'Weekday', field: 'weekday' as const },
@@ -135,6 +215,10 @@ const fieldNouns: Record<VirtualSeriesDefinition['field'], string> = {
   noteLength: 'note lengths',
   noteAverageWordLength: 'average note word lengths',
   noteDistinctWords: 'distinct note word counts',
+  eventMinuteOfDay: 'event times',
+  eventHourOfDay: 'hours',
+  eventDaypart: 'dayparts',
+  timeSinceCategory: 'elapsed minutes',
 };
 
 const singleDescriptions: Record<VirtualSeriesDefinition['field'], string> = {
@@ -149,6 +233,11 @@ const singleDescriptions: Record<VirtualSeriesDefinition['field'], string> = {
   noteLength: "Charts the note's length in characters by date.",
   noteAverageWordLength: "Charts the note's average word length by date.",
   noteDistinctWords: "Charts the note's number of distinct words by date.",
+  eventMinuteOfDay: 'Charts the event time of day by date.',
+  eventHourOfDay: '1 on days with an event in this hour, 0 otherwise.',
+  eventDaypart: '1 on days with an event in this six-hour window, 0 otherwise.',
+  timeSinceCategory:
+    'Charts the minutes between each event and the most recent prior entry in its source category.',
 };
 
 const timeStatWords: Partial<Record<SummaryVerb, string>> = {
@@ -168,6 +257,14 @@ export const describeVirtualSeries = (
     return definition.aggregation === 'sum'
       ? 'Counts how many times this choice was picked that day.'
       : '1 on days this choice was picked at least once, 0 otherwise.';
+  if (definition.field === 'eventDaypart')
+    return singleDescriptions.eventDaypart;
+  if (definition.field === 'eventHourOfDay')
+    return definition.optionValue === undefined
+      ? 'Adds 24 series, one per hour of day: each is 1 on days with an event in that hour, 0 otherwise.'
+      : singleDescriptions.eventHourOfDay;
+  if (definition.field === 'timeSinceCategory')
+    return 'Measures the minutes between each event and the most recent prior entry in the source category, searching back without a day limit. Days before the first source entry are omitted.';
   if (definition.perInstance)
     return 'Tracks each entry position (1st, 2nd, …) as its own series.';
   if (definition.group === undefined)
@@ -175,7 +272,9 @@ export const describeVirtualSeries = (
   if (definition.aggregation === 'count')
     return 'Charts the number of entries per day.';
   const isTime =
-    definition.field === 'startTime' || definition.field === 'stopTime';
+    definition.field === 'startTime' ||
+    definition.field === 'stopTime' ||
+    definition.field === 'eventMinuteOfDay';
   const stat =
     (isTime && timeStatWords[definition.aggregation]) || definition.aggregation;
   const sentimentNote =
@@ -209,6 +308,17 @@ export const createVirtualCorrelationInput = (
   const categoriesById = new Map(
     categories.map((category) => [category.id, category]),
   );
+  // Ascending source timestamps per category, built once per referenced source.
+  const sourceTimestampsCache = new Map<string, number[]>();
+  const sourceTimestampsFor = (sourceId: string): number[] => {
+    const cached = sourceTimestampsCache.get(sourceId);
+    if (cached) return cached;
+    const stamps = sortedEventTimestamps(
+      recordsByCategoryId.get(sourceId) ?? [],
+    );
+    sourceTimestampsCache.set(sourceId, stamps);
+    return stamps;
+  };
   const orderedCategories = groups.length
     ? [
         ...groups.flatMap((group) =>
@@ -228,10 +338,12 @@ export const createVirtualCorrelationInput = (
     for (const tag of tags) requestedWeeklyTags.add(tag);
     const definitions: VirtualSeriesDefinition[] = category.virtualSeries.length
       ? category.virtualSeries
-      : recomputeVirtualSeries(category);
+      : recomputeVirtualSeries(category, categories);
     const categoryRecords = recordsByCategoryId.get(category.id) ?? [];
 
-    for (const definition of definitions) {
+    for (const definition of definitions.flatMap((configured) =>
+      expandVirtualSeries(configured),
+    )) {
       const includeBase = definition.enabled !== false;
       const includeInverse = definition.inverseEnabled === true;
       if (!includeBase && !includeInverse) continue;
@@ -261,15 +373,24 @@ export const createVirtualCorrelationInput = (
           : undefined;
         const valuesByDate = new Map<string, number[]>();
         for (const record of instanceRecords) {
-          const value = numericValue(
-            record,
-            definition.field,
-            definition.transform,
-            definition.optionValue,
-          );
-          if (value === null) continue;
+          // Time-since yields one value per recorded period; other fields at most one.
+          const recordValues =
+            definition.field === 'timeSinceCategory'
+              ? timeSinceMinutes(
+                  record,
+                  sourceTimestampsFor(definition.timeSinceCategoryId ?? ''),
+                )
+              : [
+                  numericValue(
+                    record,
+                    definition.field,
+                    definition.transform,
+                    definition.optionValue,
+                  ),
+                ].filter((value): value is number => value !== null);
+          if (!recordValues.length) continue;
           const dateValues = valuesByDate.get(record.dateKey) ?? [];
-          dateValues.push(value);
+          dateValues.push(...recordValues);
           valuesByDate.set(record.dateKey, dateValues);
         }
         const summarizedValues = [...valuesByDate.entries()]

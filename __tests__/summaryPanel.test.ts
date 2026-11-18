@@ -140,6 +140,25 @@ describe('SummaryPanel', () => {
     ]);
   });
 
+  it('formats event-time statistics as times of day and skips unreadable stamps', async () => {
+    const onset = createDefaultCategory('event-time', 3, 'Onset');
+    const onsetRecords = Object.fromEntries(
+      [
+        { ...record(onset, 1, 0), localTime: '08:00:00' },
+        { ...record(onset, 2, 0), localTime: '10:30:00' },
+        { ...record(onset, 3, 0), localTime: 'bogus' },
+      ].map((entry) => [entry.key, entry]),
+    );
+    const { screen } = await renderPanel({
+      categories: [onset],
+      records: onsetRecords,
+    });
+    const values = rowValues(screen, 'Onset');
+    expect(values.slice(0, 4)).toEqual(['09:15', '09:15', '09:15', '09:15']);
+    // Trend columns stay numeric even for event categories.
+    expect(values[6]).toMatch(/^-?\d+\.\d{2}$/);
+  });
+
   it('shows placeholders for categories without records', async () => {
     const { screen } = await renderPanel();
     expect(rowValues(screen, 'Empty')).toEqual(Array(9).fill('--'));

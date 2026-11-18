@@ -81,6 +81,15 @@ const getActions = (
       },
     ];
   }
+  if (category.kind === 'event-time') {
+    return [
+      {
+        identifier: 'log-now',
+        buttonTitle: 'Log now',
+        options: { opensAppToForeground: true },
+      },
+    ];
+  }
   return [];
 };
 

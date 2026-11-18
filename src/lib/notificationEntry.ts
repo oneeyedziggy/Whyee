@@ -38,7 +38,7 @@ const parseNumber = (
 };
 
 const getValue = (
-  category: Exclude<CategoryDefinition, { kind: 'duration' }>,
+  category: Exclude<CategoryDefinition, { kind: 'duration' | 'event-time' }>,
   response: NotificationResponseInput,
   existing?: CategorySelectionRecord,
 ): Partial<CategorySelectionRecord> | undefined => {
@@ -95,7 +95,11 @@ export const applyNotificationResponse = (
     .slice()
     .sort((left, right) => left.ordinal - right.ordinal);
   const current = existing[0];
-  const patch = getValue(category, response, current);
+  // Responding to an event-time reminder logs (or re-stamps) the response time itself.
+  const patch =
+    category.kind === 'event-time'
+      ? { value: 0, localTime: getLocalTimeStamp(date) }
+      : getValue(category, response, current);
   if (!patch)
     return invalid('This response could not be used for the category.');
   const dateKey = getLocalDateKey(date);

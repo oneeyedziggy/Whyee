@@ -9,6 +9,7 @@ import {
   switchCategoryKind,
 } from '../lib/category';
 import { confirmAction } from '../lib/confirm';
+import { ContextMenu } from './ContextMenu';
 import { HoverTitle } from './HoverTitle';
 import { isGroupEnabled } from '../lib/groups';
 import {
@@ -38,12 +39,14 @@ import { styles } from './categoryEditorStyles';
 
 export const CategoryDetails = ({
   category,
+  categories = [],
   entryCount = 0,
   onUpdate,
   onDelete,
   onDragChange,
 }: {
   category: CategoryDefinition;
+  categories?: CategoryDefinition[];
   entryCount?: number;
   onUpdate: (category: CategoryDefinition) => void;
   onDelete: () => void;
@@ -51,7 +54,7 @@ export const CategoryDetails = ({
 }) => {
   // Config changes that alter which series exist must rebuild the series list.
   const updateAndRecompute = (next: CategoryDefinition) =>
-    onUpdate({ ...next, virtualSeries: recomputeVirtualSeries(next) });
+    onUpdate({ ...next, virtualSeries: recomputeVirtualSeries(next, categories) });
   const switchType = (kind: CategoryKind) => {
     if (kind === category.kind) return;
     const apply = () => onUpdate(switchCategoryKind(category, kind));
@@ -103,6 +106,11 @@ export const CategoryDetails = ({
           label="Notes"
           selected={category.kind === 'notes'}
           onPress={() => switchType('notes')}
+        />
+        <Segment
+          label="Event"
+          selected={category.kind === 'event-time'}
+          onPress={() => switchType('event-time')}
         />
       </View>
       <SwitchRow
@@ -200,13 +208,29 @@ export const CategoryDetails = ({
       ) : category.kind === 'number' ? (
         <NumericEditor category={category} onUpdate={onUpdate} />
       ) : category.kind === 'duration' ? (
-        <DurationEditor category={category} onUpdate={onUpdate} />
+        <DurationEditor
+          category={category}
+          categories={categories}
+          onUpdate={onUpdate}
+          onUpdateAndRecompute={updateAndRecompute}
+        />
       ) : category.kind === 'notes' ? (
         <NotesEditor />
+      ) : category.kind === 'event-time' ? (
+        <EventTimeEditor
+          category={category}
+          categories={categories}
+          onUpdate={onUpdate}
+          onUpdateAndRecompute={updateAndRecompute}
+        />
       ) : (
         <CounterEditor category={category} onUpdate={onUpdate} />
       )}
-      <VirtualSeriesEditor category={category} onUpdate={onUpdate} />
+      <VirtualSeriesEditor
+        category={category}
+        categories={categories}
+        onUpdate={onUpdate}
+      />
       <View style={styles.delete}>
         <AppButton
           size="block"
@@ -271,14 +295,16 @@ export const GroupDetails = ({
 
 const VirtualSeriesEditor = ({
   category,
+  categories,
   onUpdate,
 }: {
   category: CategoryDefinition;
+  categories?: CategoryDefinition[];
   onUpdate: (category: CategoryDefinition) => void;
 }) => {
   const series: VirtualSeriesDefinition[] = category.virtualSeries.length
     ? category.virtualSeries
-    : recomputeVirtualSeries(category);
+    : recomputeVirtualSeries(category, categories);
   const update = (id: string, patch: Partial<VirtualSeriesDefinition>) =>
     onUpdate({
       ...category,
@@ -573,10 +599,15 @@ const NumericEditor = ({
 
 const DurationEditor = ({
   category,
+  categories,
   onUpdate,
+  onUpdateAndRecompute,
 }: {
   category: Extract<CategoryDefinition, { kind: 'duration' }>;
+  categories: CategoryDefinition[];
   onUpdate: (category: CategoryDefinition) => void;
+  // Changing time-since sources changes which series exist.
+  onUpdateAndRecompute: (category: CategoryDefinition) => void;
 }) => (
   <View style={styles.configGroup}>
     <SwitchRow
@@ -631,8 +662,148 @@ const DurationEditor = ({
         })
       }
     />
+    <TimeSinceSourcePicker
+      sources={categories.filter((candidate) => candidate.id !== category.id)}
+      selectedIds={category.duration.timeSinceCategoryIds}
+      onChange={(timeSinceCategoryIds) =>
+        onUpdateAndRecompute({
+          ...category,
+          duration: { ...category.duration, timeSinceCategoryIds },
+        })
+      }
+    />
   </View>
 );
+
+const EventTimeEditor = ({
+  category,
+  categories,
+  onUpdate,
+  onUpdateAndRecompute,
+}: {
+  category: Extract<CategoryDefinition, { kind: 'event-time' }>;
+  categories: CategoryDefinition[];
+  onUpdate: (category: CategoryDefinition) => void;
+  // Changing time-since sources changes which series exist.
+  onUpdateAndRecompute: (category: CategoryDefinition) => void;
+}) => (
+  <View style={styles.configGroup}>
+    <SwitchRow
+      label="Use 24-hour clock"
+      description="Shows times as 24-hour values instead of 12-hour AM/PM."
+      value={category.eventTime.use24HourClock}
+      onChange={(use24HourClock) =>
+        onUpdate({
+          ...category,
+          eventTime: { ...category.eventTime, use24HourClock },
+        })
+      }
+    />
+    <TimeSinceSourcePicker
+      sources={categories.filter((candidate) => candidate.id !== category.id)}
+      selectedIds={category.eventTime.timeSinceCategoryIds}
+      onChange={(timeSinceCategoryIds) =>
+        onUpdateAndRecompute({
+          ...category,
+          eventTime: { ...category.eventTime, timeSinceCategoryIds },
+        })
+      }
+    />
+  </View>
+);
+
+// Dropdown rows for time-since source categories. A source can be claimed by only one row,
+// so each dropdown offers the unclaimed categories plus its own current selection.
+const TimeSinceSourcePicker = ({
+  sources,
+  selectedIds,
+  onChange,
+}: {
+  sources: CategoryDefinition[];
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+}) => {
+  const names = new Map(sources.map((source) => [source.id, source.name]));
+  const menuItems = (currentId: string | undefined) =>
+    sources
+      .filter(
+        (source) => source.id === currentId || !selectedIds.includes(source.id),
+      )
+      .map((source) => ({
+        key: source.id,
+        label: source.name,
+        onPress: () =>
+          onChange(
+            currentId === undefined
+              ? [...selectedIds, source.id]
+              : selectedIds.map((id) => (id === currentId ? source.id : id)),
+          ),
+      }));
+  const unclaimed = sources.some((source) => !selectedIds.includes(source.id));
+  return (
+    <>
+      <HintLabel
+        label="Time since"
+        description="Adds virtual series measuring the minutes between each entry and the most recent prior entry in every selected category, searching back without a day limit."
+      />
+      {selectedIds.map((id) => (
+        <View key={id} style={styles.choiceRow}>
+          <ContextMenu
+            accessibilityLabel={`Time-since source ${names.get(id) ?? 'missing category'}`}
+            items={menuItems(id)}
+            triggerStyle={[styles.input, styles.timeSinceTrigger]}
+            renderTrigger={() => (
+              <>
+                <Text style={styles.timeSinceTriggerText}>
+                  {names.get(id) ?? 'Missing category'}
+                </Text>
+                <Text style={styles.timeSinceChevron} selectable={false}>
+                  {'\u25be'}
+                </Text>
+              </>
+            )}
+          />
+          <HoverTitle
+            text={`Remove time-since source ${names.get(id) ?? 'missing category'}`}
+          >
+            <Pressable
+              accessibilityLabel={`Remove time-since source ${names.get(id) ?? 'missing category'}`}
+              accessibilityHint="Removes this category's time-since series."
+              accessibilityRole="button"
+              hitSlop={6}
+              onPress={() =>
+                onChange(selectedIds.filter((candidate) => candidate !== id))
+              }
+              style={styles.choiceRemove}
+            >
+              <Text style={styles.choiceRemoveIcon} selectable={false}>
+                {'\u2715'}
+              </Text>
+            </Pressable>
+          </HoverTitle>
+        </View>
+      ))}
+      {unclaimed ? (
+        <View style={styles.choiceAddRow}>
+          <ContextMenu
+            accessibilityLabel="Add time-since source"
+            items={menuItems(undefined)}
+            renderTrigger={() => (
+              <Text style={styles.timeSinceAddText} selectable={false}>
+                + Add time-since source
+              </Text>
+            )}
+          />
+        </View>
+      ) : null}
+      {sources.length ? null : (
+        <Text style={styles.caption}>
+          Add another category to measure time since its entries.
+        </Text>
+      )}
+    </>
+  );
+};
 
 const CounterEditor = ({
   category,

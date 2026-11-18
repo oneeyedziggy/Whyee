@@ -23,6 +23,7 @@ import { WorkspacePicker } from '../src/components/WorkspacePicker';
 import { useNotificationSync } from '../src/hooks/useNotificationSync';
 import { persistentStatePrefix } from '../src/hooks/usePersistentState';
 import { createDefaultCategory } from '../src/lib/category';
+import { createDefaultWorkspaceData } from '../src/lib/defaultCategories';
 import { getLocalDateKey } from '../src/lib/dates';
 import { createDefaultGroup } from '../src/lib/groups';
 import { createDefaultStatisticsSettings } from '../src/lib/statistics';
@@ -165,6 +166,8 @@ const mount = async () => {
 const groupIds = () => editor().groups.map((group: CategoryGroup) => group.id);
 const categoryNames = () =>
   editor().categories.map((category: CategoryDefinition) => category.name);
+const defaultCategoryNames = () =>
+  createDefaultWorkspaceData().categories.map((category) => category.name);
 
 const mood = { ...createDefaultCategory('multiple-choice', 0, 'Mood', 1), id: 'mood' };
 const energy = { ...createDefaultCategory('number', 1, 'Energy', 1), id: 'energy' };
@@ -359,10 +362,19 @@ describe('App migration', () => {
     await AsyncStorage.clear();
     await AsyncStorage.setItem(`${persistentStatePrefix}categories.v4`, '{not json');
     await mount();
-    expect(categoryNames()).toEqual(['Mood', 'Energy']);
+    expect(categoryNames()).toEqual(defaultCategoryNames());
     await waitFor(async () => expect(await stored('workspaces.v1')).toEqual([
       { id: 'user', name: 'User', notes: '', hidden: false },
     ]));
+  });
+
+  it('migrates legacy categories without stored groups into a default group', async () => {
+    await AsyncStorage.clear();
+    await seed({ 'categories.v4': [mood] });
+    await mount();
+    expect(categoryNames()).toEqual(['Mood']);
+    expect(groupIds()).toEqual(['default-group']);
+    expect(editor().groups[0].categoryIds).toEqual(['mood']);
   });
 });
 
@@ -685,15 +697,46 @@ describe('App category editing', () => {
 
   it('restores missing default categories only in the user workspace', async () => {
     await mount();
+    const defaults = createDefaultWorkspaceData();
     await act(async () => editor().onRestoreDefaults());
-    expect(categoryNames()).toEqual(['Mood', 'Energy', 'Sleep']);
+    expect(categoryNames()).toEqual(['Mood', 'Energy', 'Sleep', ...defaultCategoryNames()]);
+    // Restored categories land in their own named groups, created alongside existing ones.
+    const groupNames = () => editor().groups.map((group: CategoryGroup) => group.name);
+    expect(groupNames()).toEqual(expect.arrayContaining(['Headache', 'Stomach', 'Lifestyle']));
+    for (const defaultGroup of defaults.groups) {
+      const restored = editor().groups.find((group: CategoryGroup) => group.name === defaultGroup.name);
+      expect(restored.categoryIds).toHaveLength(defaultGroup.categoryIds.length);
+    }
 
-    await act(async () => editor().onDelete('mood'));
+    // Running again adds nothing.
     await act(async () => editor().onRestoreDefaults());
-    expect(categoryNames()).toEqual(['Energy', 'Sleep', 'Mood']);
-    const restoredId = editor().categories[2].id;
-    expect(editor().groups[0].categoryIds).toEqual(['energy', restoredId]);
-    expect(editor().groups[1].categoryIds).toEqual(['sleep']);
+    expect(categoryNames()).toEqual(['Mood', 'Energy', 'Sleep', ...defaultCategoryNames()]);
+
+    // Re-adding a deleted default re-links its time-since sources to the surviving categories.
+    const byName = (name: string) =>
+      editor().categories.find((category: CategoryDefinition) => category.name === name);
+    const mealsId = byName('Meals').id;
+    const caffeineId = byName('Caffeine').id;
+    const headacheId = byName('Headache episode').id;
+    await act(async () => editor().onDelete(byName('Stomach pain onset').id));
+    await act(async () => editor().onRestoreDefaults());
+    const restoredOnset = byName('Stomach pain onset');
+    expect(restoredOnset.eventTime.timeSinceCategoryIds).toEqual([
+      mealsId,
+      caffeineId,
+      headacheId,
+    ]);
+    const stomachGroup = editor().groups.find((group: CategoryGroup) => group.name === 'Stomach');
+    expect(stomachGroup.categoryIds).toContain(restoredOnset.id);
+
+    // Duration categories re-link the same way.
+    await act(async () => editor().onDelete(headacheId));
+    await act(async () => editor().onRestoreDefaults());
+    const restoredEpisode = byName('Headache episode');
+    expect(restoredEpisode.duration.timeSinceCategoryIds).toEqual([
+      mealsId,
+      restoredOnset.id,
+    ]);
 
     await act(async () => picker().onSelect('work'));
     await act(async () => editor().onRestoreDefaults());
@@ -701,18 +744,20 @@ describe('App category editing', () => {
   });
 
   it.each([
-    ['without a default group', [{ id: 'other', name: 'Other', categoryIds: ['sleep'], expanded: true }], 'other'],
-    ['with no stored groups', [], 'default-group'],
-  ])('restores defaults %s', async (_label, groups, target) => {
+    ['without a default group', [{ id: 'other', name: 'Other', categoryIds: ['sleep'], expanded: true }]],
+    ['with no stored groups', []],
+  ])('restores defaults %s', async (_label, groups) => {
     await seed({
       'categoriesByWorkspace.v1': { user: [sleep] },
       'groupsByWorkspace.v1': { user: groups },
     });
     await mount();
     await act(async () => editor().onRestoreDefaults());
-    expect(categoryNames()).toEqual(['Sleep', 'Mood', 'Energy']);
-    const restored = editor().groups.find((group: CategoryGroup) => group.id === target);
-    expect(restored.categoryIds).toHaveLength(3);
+    expect(categoryNames()).toEqual(['Sleep', ...defaultCategoryNames()]);
+    for (const defaultGroup of createDefaultWorkspaceData().groups) {
+      const restored = editor().groups.find((group: CategoryGroup) => group.name === defaultGroup.name);
+      expect(restored.categoryIds).toHaveLength(defaultGroup.categoryIds.length);
+    }
   });
 });
 
@@ -762,8 +807,10 @@ describe('App workspaces', () => {
 
     await act(async () => manager().onAdd('Plain', 'Notes'));
     expect(picker().selectedId).toBe('plain');
-    expect(categoryNames()).toEqual(['Mood', 'Energy']);
-    expect(editor().groups[0].categoryIds).toEqual(editor().categories.map((category: CategoryDefinition) => category.id));
+    expect(categoryNames()).toEqual(defaultCategoryNames());
+    expect(editor().groups.flatMap((group: CategoryGroup) => group.categoryIds)).toEqual(
+      editor().categories.map((category: CategoryDefinition) => category.id),
+    );
     await waitFor(async () => expect((await stored('recordsByWorkspace.v1')).plain).toEqual({}));
   });
 

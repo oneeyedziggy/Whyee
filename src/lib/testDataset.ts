@@ -310,6 +310,11 @@ const createTypedTestDataset = (specs: DatasetCategorySpec[]): TestDataset => {
           editable: !spec.multiple,
         },
       };
+    } else if (category.kind === 'event-time') {
+      category = {
+        ...category,
+        eventTime: { ...category.eventTime, use24HourClock: !spec.multiple },
+      };
     } else {
       category = {
         ...category,
@@ -377,6 +382,11 @@ const createTypedTestDataset = (specs: DatasetCategorySpec[]): TestDataset => {
           entry.noteText = noteText;
           entry.sentimentScore = scoreSentiment(noteText);
           entry.value = entry.sentimentScore;
+        } else if (category.kind === 'event-time') {
+          // The event time of day carries the signal: values 0-4 map to 06:00-18:00.
+          entry.localTime = `${String(6 + value * 3).padStart(2, '0')}:${String(
+            (dayIndex * 7) % 60,
+          ).padStart(2, '0')}:00`;
         }
         records[key] = entry;
       }
@@ -470,6 +480,8 @@ export const createTestWorkspaceDataset = (
       return createTypeEdgeDataset('counter');
     case 'testnotes':
       return createTypeEdgeDataset('notes');
+    case 'testevent':
+      return createTypeEdgeDataset('event-time');
     case 'testdata':
       return createShowcaseDataset();
     default:

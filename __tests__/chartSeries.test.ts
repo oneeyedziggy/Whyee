@@ -181,6 +181,81 @@ it('exposes only a value series for single-entry categories and daily stats for 
   expect(durationChart.series[0].label).toBe('total duration');
 });
 
+it('charts event-time categories as times of day with time-since series', () => {
+  const meals: CategoryDefinition = {
+    ...createDefaultCategory('event-time', 0, 'Meals'),
+    id: 'meals',
+    virtualSeries: [],
+  };
+  meals.virtualSeries = recomputeVirtualSeries(meals);
+  const pain: CategoryDefinition = {
+    ...(createDefaultCategory('event-time', 1, 'Pain') as Extract<
+      CategoryDefinition,
+      { kind: 'event-time' }
+    >),
+    id: 'pain',
+    allowMultiplePerDay: true,
+    eventTime: { use24HourClock: false, timeSinceCategoryIds: ['meals'] },
+    virtualSeries: [],
+  };
+  pain.virtualSeries = recomputeVirtualSeries(pain, [meals]);
+  const entry = (
+    key: string,
+    categoryId: string,
+    dateKey: string,
+    ordinal: number,
+    localTime: string,
+  ): CategorySelectionRecord => ({
+    key,
+    categoryId,
+    dateKey,
+    ordinal,
+    value: 0,
+    localTime,
+  });
+  const records = {
+    m1: entry('m1', 'meals', '2026-10-05', 0, '20:00:00'),
+    p1: entry('p1', 'pain', '2026-10-06', 0, '08:30:00'),
+    p2: entry('p2', 'pain', '2026-10-06', 1, '10:30:00'),
+  };
+  const [painChart, mealsChart] = buildChartCategories([pain, meals], records);
+
+  const mean = painChart.series.find(
+    (series) => series.id === 'pain:chart:virtual:pain:time:mean',
+  );
+  expect(mean).toMatchObject({ timeOfDayValue: true, use24HourClock: false });
+  expect(mean?.points.map((point) => point.value)).toEqual([null, 570]);
+
+  // Elapsed minutes read as plain numbers, measured against the meal logged the night before.
+  const since = painChart.series.find(
+    (series) => series.id === 'pain:chart:virtual:pain:since:meals:mean',
+  );
+  expect(since?.timeOfDayValue).toBeUndefined();
+  expect(since?.points.map((point) => point.value)).toEqual([null, 810]);
+
+  const daypart = painChart.series.find(
+    (series) => series.id === 'pain:chart:virtual:pain:daypart:1',
+  );
+  expect(daypart?.timeOfDayValue).toBeUndefined();
+  expect(daypart?.points.map((point) => point.value)).toEqual([null, 1]);
+
+  const count = painChart.series.find(
+    (series) => series.id === 'pain:chart:virtual:pain:count',
+  );
+  expect(count?.timeOfDayValue).toBeUndefined();
+
+  const raw = painChart.series.find((series) => series.raw);
+  expect(raw).toMatchObject({ timeOfDayValue: true, use24HourClock: false });
+  expect(raw?.points.map((point) => point.value)).toEqual([510, 630]);
+
+  expect(mealsChart.defaultSeriesId).toBe('meals:chart:virtual:meals:time');
+  const mealTime = mealsChart.series.find(
+    (series) => series.id === mealsChart.defaultSeriesId,
+  );
+  expect(mealTime).toMatchObject({ timeOfDayValue: true, use24HourClock: true });
+  expect(mealTime?.points.map((point) => point.value)).toEqual([1200, null]);
+});
+
 it('keeps globally missing days as gaps and centers constant daily points', () => {
   const category = { ...createDefaultCategory('number', 0), id: 'reading' };
   const records = Object.fromEntries(

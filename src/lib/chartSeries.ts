@@ -12,8 +12,13 @@ import {
   allowsMultiplePerDay,
   primarySeriesId,
   recomputeVirtualSeries,
+  timeSinceSourceIds,
 } from './category';
-import { createVirtualCorrelationInput, numericValue } from './virtualSeries';
+import {
+  createVirtualCorrelationInput,
+  expandVirtualSeries,
+  numericValue,
+} from './virtualSeries';
 import { getLocalDateKey } from './dates';
 import { chartVirtualSeriesId } from './chartSelection';
 import { seriesColors } from '../theme/tokens';
@@ -82,9 +87,17 @@ export const buildChartCategories = (
         },
       ]),
     );
+    // Time-since series measure against other categories' entries, so the projection also
+    // needs the source categories' records (they emit no series of their own here).
+    const sinceSourceIds = timeSinceSourceIds(category);
+    const sourceRecords = Object.fromEntries(
+      allRecords
+        .filter((record) => sinceSourceIds.includes(record.categoryId))
+        .map((record) => [record.key, record]),
+    );
     const projected = createVirtualCorrelationInput(
       [{ ...category, virtualSeries: definitions }],
-      chartRecords,
+      { ...sourceRecords, ...chartRecords },
       [],
       false,
     );
@@ -104,7 +117,9 @@ export const buildChartCategories = (
           ? category.sentimentEnabled
             ? numericValue(record, 'noteText', 'sentimentScore')
             : null
-          : record.value;
+          : category.kind === 'event-time'
+            ? numericValue(record, 'eventMinuteOfDay')
+            : record.value;
       if (value === null || !Number.isFinite(value)) continue;
       entriesPerDay.set(
         record.dateKey,
@@ -121,6 +136,7 @@ export const buildChartCategories = (
       points: Omit<ChartPoint, 'normalized'>[],
       raw: boolean,
       durationValue: boolean,
+      timeOfDayValue: boolean,
     ) => {
       let hash = 0;
       for (const character of id)
@@ -133,6 +149,14 @@ export const buildChartCategories = (
         durationValue,
         showMilliseconds:
           category.kind === 'duration' && category.duration.showMilliseconds,
+        ...(timeOfDayValue
+          ? {
+              timeOfDayValue: true,
+              use24HourClock:
+                category.kind !== 'event-time' ||
+                category.eventTime.use24HourClock,
+            }
+          : {}),
         color: seriesColors[hash % seriesColors.length],
         points: normalize(points),
       });
@@ -143,7 +167,9 @@ export const buildChartCategories = (
         timestamp: timestampAt(date),
         value: values.get(date) ?? null,
       }));
-    for (const definition of definitions) {
+    for (const definition of definitions.flatMap((configured) =>
+      expandVirtualSeries(configured),
+    )) {
       const baseId = chartVirtualSeriesId(category.id, definition.id);
       // Generated names always start with the category name.
       const label =
@@ -152,6 +178,9 @@ export const buildChartCategories = (
       const durationValue =
         category.kind === 'duration' &&
         definition.field === 'durationMs' &&
+        definition.aggregation !== 'count';
+      const timeOfDayValue =
+        definition.field === 'eventMinuteOfDay' &&
         definition.aggregation !== 'count';
       const addWithInverse = (
         id: string,
@@ -164,6 +193,7 @@ export const buildChartCategories = (
           dailyPoints(projectedValues.get(outputId) ?? new Map()),
           false,
           durationValue,
+          timeOfDayValue,
         );
         if (showInverses)
           addSeries(
@@ -174,6 +204,7 @@ export const buildChartCategories = (
             ),
             false,
             durationValue,
+            timeOfDayValue,
           );
       };
       if (definition.perInstance) {
@@ -206,6 +237,7 @@ export const buildChartCategories = (
         rawPoints.sort((left, right) => left.timestamp - right.timestamp),
         true,
         category.kind === 'duration',
+        category.kind === 'event-time',
       );
     const primary = primarySeriesId(category);
     const primaryChartId = primary

@@ -86,6 +86,17 @@ describe('point inspection', () => {
       showMilliseconds: true,
       points: [{ key: 'e', timestamp: 2, value: 1_500, normalized: 0.2 }],
     },
+    {
+      id: 'onset',
+      name: 'Onset: time',
+      label: 'time',
+      color: '#123456',
+      raw: false,
+      durationValue: false,
+      timeOfDayValue: true,
+      use24HourClock: false,
+      points: [{ key: 'f', timestamp: 2, value: 570, normalized: 0.4 }],
+    },
   ];
   const left = 28;
   const right = 560 - 16;
@@ -119,6 +130,7 @@ describe('point inspection', () => {
     expect(
       screen.getByText(`Nap: duration: ${formatDurationValue(1_500, true)}`),
     ).toBeTruthy();
+    expect(screen.getByText('Onset: time: 09:30 AM')).toBeTruthy();
 
     await fireEvent(chart, 'responderRelease', at(Number.NaN));
     expect(screen.getByText('Reading: value: 2.00')).toBeTruthy();

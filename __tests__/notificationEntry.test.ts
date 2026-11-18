@@ -57,6 +57,39 @@ describe('notification entry application', () => {
     });
   });
 
+  it('stamps the response time for event-time categories', () => {
+    const category = createDefaultCategory('event-time', 0);
+    if (category.kind !== 'event-time') throw new Error('expected event');
+    const created = applyNotificationResponse(category, [], {}, date);
+    expect(created).toMatchObject({
+      kind: 'created',
+      entry: { ordinal: 0, dateKey: '2026-09-16', localTime: '09:05:00', value: 0 },
+    });
+
+    // A repeat response on a single-entry day re-stamps the existing entry.
+    const overwrite = applyNotificationResponse(
+      category,
+      [entry(category.id, 0, 0)],
+      {},
+      date,
+    );
+    expect(overwrite).toMatchObject({
+      kind: 'overwrite',
+      entry: { ordinal: 0, localTime: '09:05:00' },
+    });
+
+    const appended = applyNotificationResponse(
+      { ...category, allowMultiplePerDay: true },
+      [entry(category.id, 0, 0)],
+      {},
+      date,
+    );
+    expect(appended).toMatchObject({
+      kind: 'appended',
+      entry: { ordinal: 1, localTime: '09:05:00' },
+    });
+  });
+
   it('proposes an overwrite for a single number entry', () => {
     const category = createDefaultCategory('number', 0);
     if (category.kind !== 'number') throw new Error('expected number');

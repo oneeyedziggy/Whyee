@@ -3,7 +3,9 @@ import {
   formatHumanDate,
   getLocalDateKey,
   getLocalTimeStamp,
+  localRecordTimestampMs,
   makeRecordKey,
+  minutesOfDayFromTimeStamp,
   nowOnDateKey,
 } from '../src/lib/dates';
 
@@ -23,6 +25,35 @@ describe('date keys and stamps', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+});
+
+describe('minutesOfDayFromTimeStamp', () => {
+  it('converts record time stamps to whole minutes since midnight', () => {
+    expect(minutesOfDayFromTimeStamp('00:00:00')).toBe(0);
+    expect(minutesOfDayFromTimeStamp('09:30:45')).toBe(570);
+    expect(minutesOfDayFromTimeStamp('23:59:59')).toBe(1439);
+  });
+
+  it('rejects missing or malformed stamps', () => {
+    expect(minutesOfDayFromTimeStamp(undefined)).toBeNull();
+    expect(minutesOfDayFromTimeStamp('')).toBeNull();
+    expect(minutesOfDayFromTimeStamp('not a time')).toBeNull();
+    expect(minutesOfDayFromTimeStamp('25:00:00')).toBeNull();
+  });
+});
+
+describe('localRecordTimestampMs', () => {
+  it('combines a date key and local time into epoch milliseconds', () => {
+    expect(localRecordTimestampMs('2026-01-05', '07:03:09')).toBe(
+      new Date(2026, 0, 5, 7, 3, 9).getTime(),
+    );
+  });
+
+  it('rejects malformed date keys and times', () => {
+    expect(localRecordTimestampMs('not-a-date', '07:03:09')).toBeNull();
+    expect(localRecordTimestampMs('2026-01-05', undefined)).toBeNull();
+    expect(localRecordTimestampMs('2026-01-05', 'bogus')).toBeNull();
   });
 });
 

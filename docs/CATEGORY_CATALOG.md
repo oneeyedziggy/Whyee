@@ -12,9 +12,10 @@ All recommendations use the current React Native `CategoryDefinition` model.
 | --- | --- | --- |
 | `Choice` | `multiple-choice` | Ordered options with numeric values; `multiSelect` when several options may coexist |
 | `Number` | `number` | `min / max / step`; put the unit in the category name because units are not a separate field |
-| `Duration` | `duration` | `resetEnabled / cumulative / animate / splitEnabled / showMilliseconds` |
+| `Duration` | `duration` | `resetEnabled / cumulative / animate / splitEnabled / showMilliseconds / timeSinceCategoryIds`; entries are anchored at their first start time and can emit per-period minutes-since-source series |
 | `Counter` | `counter` | `steps / resetEnabled / editable / splitEnabled` |
 | `Notes` | `notes` | Free text with optional local sentiment analysis |
+| `EventTime` | `event-time` | The entry's clock time is the datum; `use24HourClock / timeSinceCategoryIds`; series for minute of day, four dayparts, a single hourly-breakdown toggle (24 fanned-out 0/1 series), count/day, and minutes-since-source |
 
 Unless a row says otherwise, use these base settings:
 
@@ -462,13 +463,9 @@ The following data shapes are not well represented by the current five kinds. Th
 
 ### 2. Timestamp / time of day
 
-**Need:** A single clock time or date-time with circular time-of-day analysis.
+**Status: implemented as the `event-time` kind.** Each entry's editable `localTime` is the datum; "Log now" stamps the current time. Derived series cover the minute of day, four daypart indicators, a single hourly-breakdown toggle that fans out into 24 per-hour 0/1 series, a per-day count, and `timeSinceCategoryIds`-driven "minutes since the most recent prior entry" series with unlimited lookback. Durations also carry `timeSinceCategoryIds` (one datapoint per recorded period, anchored at the period's start), and duration *sources* contribute each recorded period's start as an event.
 
-**Examples:** Bedtime, wake time, medication time, meal time, symptom onset, baby feed time.
-
-**Why current types are insufficient:** Duration exposes derived start/stop times only while timing an interval. Number values mishandle midnight and daylight-saving transitions.
-
-**Suggested config:** `mode: time | dateTime`, `timeZonePolicy`, `allowMultiplePerDay`, and circular mean/min/max series.
+**Remaining gaps:** circular statistics (a linear minute-of-day mean mishandles midnight-spanning times — prefer the daypart series near midnight), a `dateTime` mode, and an explicit time-zone policy.
 
 ### 3. Structured interval / episode
 
@@ -641,3 +638,44 @@ The following data shapes are not well represented by the current five kinds. Th
 - Track "not measured," "not applicable," and true zero separately in a future missing-value model. Absence of an entry must not silently become zero.
 - Sentiment analysis is most useful for reflective mood notes. Disable it for factual logs, medical terminology, terse baby logs, and other text where lexical tone is not the intended construct.
 - Prefer a short baseline set, add categories when a concrete question arises, and periodically retire categories that are not used.
+
+## Worked example: default User workspace
+
+These are the categories seeded into a fresh "User" workspace (`src/lib/defaultCategories.ts`), a headache / stomach-pain tracking setup for a hybrid home-office worker with a young child and a partner. "Restore defaults" re-adds any of them (matched by name) into these named groups. "Items mode" means `optionSeriesMode: 'items'` with `capped` occurrences: one 0/1 series per option per day.
+
+### Group: Headache
+
+| Category | Type and configuration | Tracking intent |
+| --- | --- | --- |
+| Headache episode | Duration: multi/day; notes; sum primary; `timeSinceCategoryIds: [Meals, Stomach pain onset]` | One timed entry per headache; start-time series cover onset times, and each recorded period emits "minutes since last meal / stomach pain" datapoints |
+| Headache severity | Number: `0 / 10 / 1`; notes; multi/day; max primary | Worst daily headache |
+| Headache pain type | Choice: Throbbing/pulsating, Pressure/band-like, Stabbing/sharp, Dull ache, Behind the eyes, One-sided, Sinus/facial pressure, Neck/shoulder-related; multi-select; items mode; multi/day; notes; descriptive | Pain-quality descriptors as independent series |
+| Activity at headache onset | Choice: Desk work (screen), Video meetings, Commuting, Childcare/play, Chores/housework, Cooking/eating, Exercise, Relaxing/screen leisure, Just woke up; multi-select; items mode; multi/day; notes; descriptive | Onset context; identical option list to the stomach group |
+| Worked from | Choice: Home, Office, Datacenter; single-select; items mode; descriptive | One 0/1 series per work location per day |
+
+### Group: Stomach
+
+| Category | Type and configuration | Tracking intent |
+| --- | --- | --- |
+| Stomach pain onset | EventTime: multi/day; `timeSinceCategoryIds: [Meals, Caffeine, Headache episode]` | Onset times plus automatic "minutes since last meal / caffeine / headache at pain" series |
+| Stomach pain severity | Number: `0 / 10 / 1`; notes; multi/day; max primary | Worst daily pain |
+| Stomach pain area | Choice: Upper middle (epigastric), Upper right (under ribs), Upper left, Around navel, Lower right, Lower left, Lower middle (pelvic), Whole abdomen/diffuse; multi-select; items mode; multi/day; notes; descriptive | Per-region series as a body-map stand-in |
+| Stomach pain type | Choice: Cramping, Burning, Sharp/stabbing, Dull ache, Bloating/pressure, Gnawing/hunger-like, Nausea-accompanied; multi-select; items mode; multi/day; notes; descriptive | GI pain descriptors |
+| Activity at stomach pain onset | Choice: same nine options as the headache activity list; multi-select; items mode; multi/day; notes; descriptive | Kept identical so activity series align across both groups |
+
+### Group: Lifestyle
+
+| Category | Type and configuration | Tracking intent |
+| --- | --- | --- |
+| Meals | Choice: Olive-oil salad/vegetables, Whole grains, Legumes, Fish/seafood, Poultry, Eggs, Yogurt/cheese, Nuts/seeds, Fruit, Tomato-based dish, Garlic/onion-heavy dish, Off-plan/processed; multi-select; items mode; multi/day; notes | What and when: entry times anchor the time-since series for both symptom categories; per-food 0/1 series cover composition |
+| Caffeine | Choice: Coffee `95`, Tea `47`, Espresso `63`, Double espresso `126` (typical mg/serving, values shown); single-select; intensity mode; multi/day; sum primary; inverse off | Daily caffeine mg as one series; entry times double as the time-since caffeine source |
+| Sleep duration (h) | Number: `0 / 14 / 0.25`; notes | Short sleep is the top headache confounder with a young child |
+| Night wakings | Counter: steps `[-1, 1]`; editable | Sleep fragmentation independent of total hours |
+| Water intake (glasses) | Counter: steps `[-1, 1]`; editable | Dehydration headaches |
+| Screen time | Duration: defaults; multi/day; sum | Eye strain / tension headaches |
+| Pain med doses | EventTime: multi/day; notes | Per-dose times plus a count/day series; frequent use flags medication-overuse (rebound) headache |
+| Household illness | Choice: None, Child sick, Partner sick, Self sick; multi-select; items mode; descriptive | Daycare-borne infections explain symptom clusters |
+| Stress | Number: `0 / 10 / 1`; notes; sentiment; multi/day; mean; weekly | Perceived stress |
+| Stool form (Bristol) | Choice: Type 1 through Type 7 mapped to values `1`-`7`; multi/day; median primary; notes; count series enabled | Standardized GI context; the entries-count series doubles as bowel-movement frequency |
+
+Deliberately omitted from the defaults: an alcohol counter and a posture rating, a manual "time since last meal" number (the automatic time-since series supersedes it), and a separate bowel-movement counter (Stool form's entries-count series covers it).
